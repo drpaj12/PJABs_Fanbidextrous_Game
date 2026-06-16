@@ -1,15 +1,12 @@
 {
   "_comment": "All game constants live here. No magic numbers in code.",
-
   "display": {
-    "title": "My GameJam Game",
-    "width": 1280,
-    "height": 720,
+    "title": "Coop Soccer Predictor",
+    "width": 414,
+    "height": 896,
     "fps": 60
   },
-
   "colors": {
-    "_comment": "RGB tuples. Change values here to retheme the whole game.",
     "background": [15, 16, 20],
     "surface":    [23, 25, 31],
     "border":     [44, 47, 58],
@@ -18,20 +15,45 @@
     "accent":     [0, 245, 228],
     "white":      [238, 240, 245],
     "red":        [192, 57, 43],
+    "green":      [39, 174, 96],
     "gold":       [184, 150, 10]
   },
-
   "game": {
-    "start_health":    10,
-    "max_turns":       20,
-    "points_per_action": 1,
-    "_comment": "Add your game-specific values below this line."
+    "roster_size": 6,
+    "window_seconds": 300,
+    "max_predictions_per_window": 2
   },
-
+  "scoring": {
+    "exact_credit": 2,
+    "near_band": 1,
+    "near_credit": 1,
+    "miss_concede": 2
+  },
+  "meter": {
+    "success_threshold": 6,
+    "concede_threshold": 6
+  },
+  "rating": {
+    "_comment": "magnitude = base * (mag_floor + mag_per_star * stars); conversion = conv_base + conv_per_star * stars",
+    "mag_floor": 0.6,
+    "mag_per_star": 0.2,
+    "conv_per_star": 0.03,
+    "min_stars": 1,
+    "max_stars": 5
+  },
+  "feed": {
+    "poll_seconds": 120
+  },
+  "relay": {
+    "base_url": "https://drpeterjamieson.com/game",
+    "sync_path": "/sync.php",
+    "feed_path": "/feed_cache.php"
+  },
   "assets": {
-    "data_dir":     "assets/data",
-    "image_dir":    "assets/images",
-    "sound_dir":    "assets/sounds",
-    "entities_file": "assets/data/entities.json"
+    "data_dir": "assets/data",
+    "image_dir": "assets/images",
+    "sound_dir": "assets/sounds",
+    "powers_file": "assets/data/powers.json",
+    "stats_menu_file": "assets/data/stats_menu.json"
   }
 }
