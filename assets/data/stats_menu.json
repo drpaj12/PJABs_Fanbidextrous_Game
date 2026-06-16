@@ -1,0 +1,10 @@
+{
+  "_comment": "Predictable stats. kind=incident (count occurrences) or delta (end-minus-start). Finalize 'api_field' after the Phase 3 smoke test confirms real field names.",
+  "stats": [
+    { "code": "goal",   "label": "Goals",          "kind": "incident", "api_field": "goals",         "default_line": 1 },
+    { "code": "corner", "label": "Corners",        "kind": "delta",    "api_field": "corner_kicks",  "default_line": 3 },
+    { "code": "shot",   "label": "Shots on target","kind": "delta",    "api_field": "shots_on_goal", "default_line": 2 },
+    { "code": "card",   "label": "Cards",          "kind": "incident", "api_field": "cards",         "default_line": 1 },
+    { "code": "save",   "label": "Saves",          "kind": "delta",    "api_field": "goalkeeper_saves","default_line": 2 }
+  ]
+}
