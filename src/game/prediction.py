@@ -19,3 +19,23 @@ class Prediction:
         if not stat or not num.lstrip("-").isdigit():
             raise ValueError(f"bad prediction code: {code!r}")
         return cls(stat_code=stat, line=int(num))
+
+
+from src.utils.constants import CONFIG
+
+_S = CONFIG["scoring"]
+
+
+@dataclass(frozen=True)
+class Grade:
+    success_credit: int
+    concede_credit: int
+
+
+def grade(prediction: "Prediction", actual: int) -> Grade:
+    diff = abs(prediction.line - actual)
+    if diff == 0:
+        return Grade(success_credit=_S["exact_credit"], concede_credit=0)
+    if diff <= _S["near_band"]:
+        return Grade(success_credit=_S["near_credit"], concede_credit=0)
+    return Grade(success_credit=0, concede_credit=_S["miss_concede"])
