@@ -1,0 +1,41 @@
+{
+  "_comment": "22 power effects. magnitude scaled by star rating in code. Edit freely to rebalance.",
+  "archetypes": {
+    "GK":  { "group": "defense",   "conversion_base": 0.10,
+             "this_window": { "kind": "negate_concede_shot", "value": 1.0 },
+             "next_window": { "kind": "success_credit_add",  "value": -1.0 } },
+    "CB":  { "group": "defense",   "conversion_base": 0.13,
+             "this_window": { "kind": "concede_credit_mult", "value": 0.5 },
+             "next_window": { "kind": "success_credit_add",  "value": -1.0 } },
+    "FB":  { "group": "defense",   "conversion_base": 0.15,
+             "this_window": { "kind": "concede_credit_add",  "value": -1.0 },
+             "next_window": { "kind": "success_credit_add",  "value": -1.0 } },
+    "WB":  { "group": "defense",   "conversion_base": 0.17,
+             "this_window": { "kind": "concede_credit_add",  "value": -1.0 },
+             "next_window": { "kind": "success_credit_add",  "value": -0.5 } },
+    "DM":  { "group": "defense",   "conversion_base": 0.18,
+             "this_window": { "kind": "concede_credit_mult", "value": 0.5 },
+             "next_window": { "kind": "success_credit_add",  "value": -0.5 } },
+    "CM":  { "group": "playmaker", "conversion_base": 0.20,
+             "this_window": { "kind": "success_credit_add",  "value": 1.0 },
+             "next_window": { "kind": "success_credit_add",  "value": 1.0 } },
+    "AM":  { "group": "attack",    "conversion_base": 0.24,
+             "this_window": { "kind": "success_credit_mult", "value": 2.0 },
+             "next_window": { "kind": "concede_credit_add",  "value": 1.0 } },
+    "WG":  { "group": "attack",    "conversion_base": 0.26,
+             "this_window": { "kind": "conversion_add",      "value": 0.15 },
+             "next_window": { "kind": "concede_credit_add",  "value": 1.0 } },
+    "SS":  { "group": "attack",    "conversion_base": 0.30,
+             "this_window": { "kind": "success_credit_add",  "value": 2.0 },
+             "next_window": { "kind": "concede_credit_add",  "value": 1.0 } },
+    "ST":  { "group": "attack",    "conversion_base": 0.35,
+             "this_window": { "kind": "conversion_add",      "value": 0.20 },
+             "next_window": { "kind": "concede_credit_add",  "value": 1.5 } }
+  },
+  "broad_position_map": {
+    "Goalkeeper": ["GK"],
+    "Defender":   ["CB", "FB", "WB"],
+    "Midfielder": ["DM", "CM", "AM"],
+    "Attacker":   ["WG", "SS", "ST"]
+  }
+}
