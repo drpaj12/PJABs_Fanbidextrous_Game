@@ -6,3 +6,4 @@ Append one line per session. Never delete old entries.
 ---
 
 2026-06-15 | Project created from DarkWeb GameJam template | All files
+2026-06-16 | API-Football smoke test script created; LIVE GATE PENDING (needs human API key + live match) - v1 defaults to MockFeed until verified | scripts/smoke_test_apifootball.py
