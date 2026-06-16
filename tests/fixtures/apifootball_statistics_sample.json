@@ -1,0 +1,12 @@
+{
+  "response": [
+    {
+      "team": {"id": 26, "name": "Canada"},
+      "statistics": [
+        {"type": "Corner Kicks", "value": 5},
+        {"type": "Shots on Goal", "value": 4},
+        {"type": "Goalkeeper Saves", "value": 2}
+      ]
+    }
+  ]
+}

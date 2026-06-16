@@ -1,0 +1,14 @@
+{
+  "response": [
+    {
+      "team": {"id": 26, "name": "Canada"},
+      "startXI": [
+        {"player": {"id": 501, "name": "A. Davies", "number": 19, "pos": "D"}},
+        {"player": {"id": 502, "name": "J. David", "number": 20, "pos": "F"}}
+      ],
+      "substitutes": [
+        {"player": {"id": 503, "name": "S. Larin", "number": 17, "pos": "F"}}
+      ]
+    }
+  ]
+}
