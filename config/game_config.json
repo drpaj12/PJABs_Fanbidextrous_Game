@@ -1,0 +1,37 @@
+{
+  "_comment": "All game constants live here. No magic numbers in code.",
+
+  "display": {
+    "title": "My GameJam Game",
+    "width": 1280,
+    "height": 720,
+    "fps": 60
+  },
+
+  "colors": {
+    "_comment": "RGB tuples. Change values here to retheme the whole game.",
+    "background": [15, 16, 20],
+    "surface":    [23, 25, 31],
+    "border":     [44, 47, 58],
+    "text":       [200, 204, 214],
+    "text_dim":   [107, 112, 128],
+    "accent":     [0, 245, 228],
+    "white":      [238, 240, 245],
+    "red":        [192, 57, 43],
+    "gold":       [184, 150, 10]
+  },
+
+  "game": {
+    "start_health":    10,
+    "max_turns":       20,
+    "points_per_action": 1,
+    "_comment": "Add your game-specific values below this line."
+  },
+
+  "assets": {
+    "data_dir":     "assets/data",
+    "image_dir":    "assets/images",
+    "sound_dir":    "assets/sounds",
+    "entities_file": "assets/data/entities.json"
+  }
+}

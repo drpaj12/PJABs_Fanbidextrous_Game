@@ -1,0 +1,27 @@
+[
+  {
+    "_comment": "Sample entity data. Replace with your real entities from DESIGN.md Section 4.",
+    "entity_id": "entity_01",
+    "name": "Sample Entity A",
+    "stat_a": 4,
+    "stat_b": 3,
+    "description": "A balanced example. Rename stat_a/stat_b to whatever your game tracks.",
+    "tags": ["starter"]
+  },
+  {
+    "entity_id": "entity_02",
+    "name": "Sample Entity B",
+    "stat_a": 5,
+    "stat_b": 1,
+    "description": "High stat_a, low stat_b -- an example of an extreme tradeoff.",
+    "tags": ["fast"]
+  },
+  {
+    "entity_id": "entity_03",
+    "name": "Sample Entity C",
+    "stat_a": 1,
+    "stat_b": 6,
+    "description": "Low stat_a, high stat_b -- the opposite tradeoff.",
+    "tags": ["tank"]
+  }
+]

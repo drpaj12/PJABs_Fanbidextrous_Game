@@ -1,0 +1,9 @@
+# Core rendering -- use pygame-ce (Community Edition), NOT standard pygame
+# pygame-ce has better web support via pygbag
+pygame-ce>=2.4.0
+
+# Web build tool -- packages your game for the browser
+pygbag>=0.9.0
+
+# Testing
+pytest>=8.0.0

@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build artifacts (zip/apk/tar.gz outputs) -- templates are source, tracked below
+NATIVE_BUILD/
+WEB_BUILD/*
+!WEB_BUILD/index_desktop.html
+!WEB_BUILD/index_mobile.html
+!WEB_BUILD/web_build_notes.md
+*.spec
+
+# Debug outputs from TOOLS/ scripts (captures, previews, etc.)
+DEBUG_OUTPUTS/
+
+# Pytest
+.pytest_cache/
+
+# Claude Code memory
+.claude/
+
+# Local save files / runtime preferences written by the game
+.*_prefs.json
