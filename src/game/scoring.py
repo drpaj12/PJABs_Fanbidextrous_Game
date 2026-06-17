@@ -15,7 +15,10 @@ class ScoreEvent:
 
     @classmethod
     def from_code(cls, code: str) -> "ScoreEvent":
-        slot, window, side, scored = code.split(":")
+        parts = code.split(":")
+        if len(parts) != 4:
+            raise ValueError(f"bad score-event code: {code!r}")
+        slot, window, side, scored = parts
         return cls(slot=int(slot), window=int(window), side=side, scored=scored == "1")
 
 

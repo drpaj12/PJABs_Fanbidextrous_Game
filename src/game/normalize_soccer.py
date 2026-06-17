@@ -9,8 +9,8 @@ _STAT_FIELD = {
     "Goalkeeper Saves": "goalkeeper_saves",
     "Total Shots": "total_shots",
     "Fouls": "fouls",
-    "Yellow Cards": "yellow_cards",
-    "Red Cards": "red_cards",
+    "Yellow Cards": "cards",
+    "Red Cards": "cards",
 }
 
 
@@ -42,3 +42,15 @@ def parse_statistics(data: dict) -> dict[str, int]:
             value = entry.get("value")
             stats[field_name] = stats.get(field_name, 0) + int(value or 0)
     return stats
+
+
+def actuals_from_raw(raw: dict[str, int], menu: dict) -> dict[str, int]:
+    """Translate API-field-keyed stats into engine stat codes via stats_menu api_field.
+
+    Each menu stat maps its `api_field` value in `raw` to the stat `code` the engine
+    grades against. Stats with no matching field in `raw` resolve to 0. This is the single
+    bridge between the feed's key space and the engine's; both the live path and the demo
+    use it. (The `goal` stat has no source in the statistics endpoint -- goals come from
+    fixture/events data -- so it resolves to 0 here until the live events path is wired.)
+    """
+    return {s["code"]: int(raw.get(s["api_field"], 0)) for s in menu.get("stats", [])}

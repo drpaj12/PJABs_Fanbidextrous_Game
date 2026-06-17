@@ -46,7 +46,7 @@
   },
   "relay": {
     "base_url": "https://drpeterjamieson.com/game",
-    "sync_path": "/sync.php",
+    "api_path": "/soccer_api.php",
     "feed_path": "/feed_cache.php"
   },
   "assets": {

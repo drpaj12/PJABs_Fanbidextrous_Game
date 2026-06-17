@@ -9,6 +9,10 @@ from src.game.scoring import aggregate
 from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.predict_screen import PredictScreen
 from src.ui.screens.status_screens import WatchScreen, RevealScreen, FinalScreen
+from src.utils.constants import CONFIG, load_data
+from src.game.normalize_soccer import actuals_from_raw
+
+_STATS_MENU = load_data(CONFIG["assets"]["stats_menu_file"])
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -51,9 +55,8 @@ def _stat_deltas(feed: MockFeed, start_min: int, end_min: int) -> dict[str, int]
     a = feed.snapshot_at(start_min)
     b = feed.snapshot_at(end_min)
     keys = set(a.stats) | set(b.stats)
-    return {k.replace("corner_kicks", "corner").replace("shots_on_goal", "shot")
-             .replace("goalkeeper_saves", "save").replace("goals", "goal")
-             .replace("cards", "card"): b.delta(a, k) for k in keys}
+    raw = {k: b.delta(a, k) for k in keys}
+    return actuals_from_raw(raw, _STATS_MENU)
 
 
 def _run_window(app, feed, pool, session, state, score_codes) -> None:
