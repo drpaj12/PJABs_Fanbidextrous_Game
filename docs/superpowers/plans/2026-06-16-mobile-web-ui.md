@@ -1069,7 +1069,7 @@ Time-driven state machine modeled on `roll_display.py`. Plays the CinematicScrip
 beat, animating meters between values, flashing on EXPLODE/GOAL/CONCEDE, shaking on goals.
 Tap or SIM `S` skips to the end. Calls `on_done()` once, after the SUMMARY beat is held.
 
-- [ ] **Step 1: Implement `src/ui/screens/cinematic_screen.py`**
+- [x] **Step 1: Implement `src/ui/screens/cinematic_screen.py`**
 
 ```python
 # src/ui/screens/cinematic_screen.py
@@ -1244,7 +1244,7 @@ class CinematicScreen(Screen):
                          (m, surface.get_height() - 48))
 ```
 
-- [ ] **Step 2: Smoke-import + commit**
+- [x] **Step 2: Smoke-import + commit**
 
 Run: `.venv/Scripts/python -c "import src.ui.screens.cinematic_screen"`
 `git add src/ui/screens/cinematic_screen.py`

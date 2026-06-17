@@ -49,6 +49,20 @@ if live) so the full loop can be exercised and tuned without waiting for a live 
   Remaining polish (optional): an in-game match picker UI to choose among the three sims,
   and shortening the 18-20 window replay (e.g. larger windows) if the full match feels long.
 
+- [x] **B6. Full mobile-web UI built** (`feat/mobile-web-ui`): config-driven layout
+  (`config/layout_config.json` + `Layout` helper), the full screen flow
+  (splash -> room -> draft-with-tap-to-zoom -> play -> cinematic -> final), a pure
+  cinematic beat-script builder (`src/game/cinematic.py`, unit-tested), SIM hotkeys +
+  help popup, and a dev layout tweaker (`TOOLS/ui_tweaker.py`). A headless smoke driver
+  (`TOOLS/smoke_flow.py`) drives both feed paths end-to-end to the final screen. 61 tests
+  pass. The in-browser interactive walkthrough remains the manual gate below.
+
+  - [ ] **B6a. Interactive walkthrough (manual gate).** Run
+    `.venv/Scripts/python src/main.py --sim wc2018_final_fra_cro` on a desktop and confirm
+    each screen renders and plays by hand (splash skip, room popup, draft zoom + Select,
+    play steppers + lock, cinematic ticks/explode/shot/GOAL/shake/skip, final scoreline).
+    Headless `smoke_flow.py` is the automated proxy; this gate confirms the visuals.
+
 ---
 
 ## C. Deferred follow-up plan (real remaining feature work)
