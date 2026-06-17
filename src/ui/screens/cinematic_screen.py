@@ -4,15 +4,22 @@
 Simple primitives only (rects, circles, lines, text). Tap or SIM 'S' skips. on_done()
 fires exactly once when the script finishes (or is skipped).
 """
+from typing import TYPE_CHECKING, Callable, Optional
+
 import pygame
 from src.ui.screens.base import Screen
 from src.ui.widgets import MeterBar, font
 from src.game.cinematic import (
     CinematicScript, TICK, METER, EXPLODE, SHOT, GOAL, CONCEDE, MISS, SUMMARY)
+from src.ui.sim import SimMode
 from src.utils.constants import CONFIG, LAYOUT
 
+if TYPE_CHECKING:
+    from src.ui.app import App
+
 _C = CONFIG["colors"]
-_THRESH = CONFIG["meter"]["success_threshold"]
+_SUCCESS_THRESH = CONFIG["meter"]["success_threshold"]
+_CONCEDE_THRESH = CONFIG["meter"]["concede_threshold"]
 
 _DUR = {
     TICK: lambda: LAYOUT.f("cine_tick_dur", 0.55),
@@ -27,7 +34,8 @@ _DUR = {
 
 
 class CinematicScreen(Screen):
-    def __init__(self, app, script: CinematicScript, on_done, sim=None) -> None:
+    def __init__(self, app: "App", script: CinematicScript,
+                 on_done: Callable[..., None], sim: Optional[SimMode] = None) -> None:
         super().__init__(app)
         self.script = script
         self.on_done = on_done
@@ -38,9 +46,10 @@ class CinematicScreen(Screen):
         sw = app.screen.get_size()[0]
         m = LAYOUT.i("screen_margin", 20)
         mh = LAYOUT.i("cine_meter_h", 30)
+        top = LAYOUT.i("cine_meter_top", 300)
         gap = LAYOUT.i("cine_meter_gap", 60)
-        self.success_bar = MeterBar(pygame.Rect(m, 300, sw - 2 * m, mh), _C["green"])
-        self.concede_bar = MeterBar(pygame.Rect(m, 300 + gap, sw - 2 * m, mh), _C["red"])
+        self.success_bar = MeterBar(pygame.Rect(m, top, sw - 2 * m, mh), _C["green"])
+        self.concede_bar = MeterBar(pygame.Rect(m, top + gap, sw - 2 * m, mh), _C["red"])
         self.success_val = 0
         self.concede_val = 0
         self.success_disp = 0.0
@@ -126,14 +135,15 @@ class CinematicScreen(Screen):
             fl.fill((*tint, int(120 * self.flash)))
             surface.blit(fl, (0, 0))
         lf = font(LAYOUT.i("cine_label_size", 22))
+        label_off = LAYOUT.i("cine_label_offset_y", 26)
         surface.blit(lf.render("Attack", True, _C["text_dim"]),
-                     (m + ox, self.success_bar.rect.y - 26))
+                     (m + ox, self.success_bar.rect.y - label_off))
         exp_s = self.flash if (b and b.kind == EXPLODE and b.meter == "success") else 0.0
         exp_c = self.flash if (b and b.kind == EXPLODE and b.meter == "concede") else 0.0
-        self.success_bar.draw(surface, int(round(self.success_disp)), _THRESH, exp_s)
+        self.success_bar.draw(surface, int(round(self.success_disp)), _SUCCESS_THRESH, exp_s)
         surface.blit(lf.render("Danger", True, _C["text_dim"]),
-                     (m + ox, self.concede_bar.rect.y - 26))
-        self.concede_bar.draw(surface, int(round(self.concede_disp)), _THRESH, exp_c)
+                     (m + ox, self.concede_bar.rect.y - label_off))
+        self.concede_bar.draw(surface, int(round(self.concede_disp)), _CONCEDE_THRESH, exp_c)
 
         if b is None:
             return
@@ -143,28 +153,32 @@ class CinematicScreen(Screen):
             color = _C["green"] if b.detail == "hit" else (
                 _C["gold"] if b.detail == "near" else _C["red"])
             t = lf.render(txt, True, color)
-            surface.blit(t, t.get_rect(center=(cx, 200)))
+            surface.blit(t, t.get_rect(center=(cx, LAYOUT.i("cine_tick_y", 200))))
         elif b.kind == SHOT:
             prog = min(1.0, self.t / max(0.01, self._dur()))
             r = LAYOUT.i("cine_shot_r", 16)
-            sy = int(620 - prog * 120)
+            sy = int(LAYOUT.i("cine_shot_start_y", 620)
+                     - prog * LAYOUT.i("cine_shot_travel", 120))
             pygame.draw.circle(surface, _C["white"], (cx, sy), r)
             gw, gh = LAYOUT.i("cine_goal_box_w", 120), LAYOUT.i("cine_goal_box_h", 70)
             pygame.draw.rect(surface, _C["border"],
-                             (cx - gw // 2, 470, gw, gh), width=3)
+                             (cx - gw // 2, LAYOUT.i("cine_goalbox_y", 470), gw, gh), width=3)
             surface.blit(lf.render("SHOT!", True, _C["white"]),
-                         lf.render("SHOT!", True, _C["white"]).get_rect(center=(cx, 660)))
+                         lf.render("SHOT!", True, _C["white"]).get_rect(
+                             center=(cx, LAYOUT.i("cine_shot_label_y", 660))))
         elif b.kind in (GOAL, CONCEDE, MISS):
             big = font(LAYOUT.i("cine_big_size", 64) if b.kind == GOAL
-                       else LAYOUT.i("cine_label_size", 22) + 14)
+                       else LAYOUT.i("cine_label_size", 22)
+                       + LAYOUT.i("cine_concede_size_delta", 14))
             color = _C["accent"] if b.kind == GOAL else (
                 _C["red"] if b.kind == CONCEDE else _C["text_dim"])
             t = big.render(b.label, True, color)
-            surface.blit(t, t.get_rect(center=(cx + ox, 440)))
+            surface.blit(t, t.get_rect(center=(cx + ox, LAYOUT.i("cine_result_y", 440))))
         elif b.kind == SUMMARY:
-            big = font(LAYOUT.i("cine_label_size", 22) + 10)
+            big = font(LAYOUT.i("cine_label_size", 22)
+                       + LAYOUT.i("cine_summary_size_delta", 10))
             msg = f"+{self.script.team_delta} for / +{self.script.opp_delta} against"
             t = big.render(msg, True, _C["white"])
-            surface.blit(t, t.get_rect(center=(cx, 440)))
+            surface.blit(t, t.get_rect(center=(cx, LAYOUT.i("cine_summary_y", 440))))
             surface.blit(lf.render("tap to continue", True, _C["text_dim"]),
-                         (m, surface.get_height() - 48))
+                         (m, surface.get_height() - LAYOUT.i("cine_summary_hint_offset", 48)))

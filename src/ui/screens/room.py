@@ -3,16 +3,23 @@
 
 on_done(room_code: str) is called when a room is created/joined.
 """
+from typing import TYPE_CHECKING, Callable, Optional
+
 import pygame
 from src.ui.screens.base import Screen
 from src.ui.widgets import Button, font
+from src.ui.sim import SimMode
 from src.utils.constants import CONFIG, LAYOUT
+
+if TYPE_CHECKING:
+    from src.ui.app import App
 
 _C = CONFIG["colors"]
 
 
 class RoomScreen(Screen):
-    def __init__(self, app, on_done, sim=None) -> None:
+    def __init__(self, app: "App", on_done: Callable[..., None],
+                 sim: Optional[SimMode] = None) -> None:
         super().__init__(app)
         self.on_done = on_done
         self.sim = sim

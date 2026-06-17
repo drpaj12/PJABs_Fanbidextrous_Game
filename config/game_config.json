@@ -21,7 +21,8 @@
   "game": {
     "roster_size": 6,
     "window_seconds": 300,
-    "max_predictions_per_window": 2
+    "max_predictions_per_window": 2,
+    "rng_seed": 99
   },
   "scoring": {
     "exact_credit": 2,

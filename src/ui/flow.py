@@ -7,13 +7,15 @@ is threaded into every screen. The engine is untouched; meter before/after value
 captured around resolve_window to drive the cinematic.
 """
 import random
+from typing import TYPE_CHECKING
 from src.game.mock_feed import MockFeed
 from src.game.replay_feed import ReplayFeed
 from src.game.athlete import DraftedAthlete
+from src.game.prediction import Prediction
 from src.game.roster import Roster
 from src.game.session import GameSession
 from src.game.scoring import aggregate
-from src.game.cinematic import build_cinematic_script
+from src.game.cinematic import CinematicScript, build_cinematic_script
 from src.ui.sim import SimMode
 from src.ui.widgets import LogList
 from src.ui.screens.splash import SplashScreen
@@ -24,10 +26,14 @@ from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen
 from src.utils.constants import CONFIG, LAYOUT, load_data
 
+if TYPE_CHECKING:
+    from src.ui.app import App
+
 _STATS_MENU = load_data(CONFIG["assets"]["stats_menu_file"])
 _STAT_LABELS = {s["code"]: s["label"] for s in _STATS_MENU["stats"]}
 _THRESH = CONFIG["meter"]["success_threshold"]
 _WINDOW_MIN = CONFIG["game"]["window_seconds"] // 60
+_RNG_SEED = CONFIG["game"]["rng_seed"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -61,7 +67,8 @@ def _pool_from_feed(feed: MockFeed) -> list[DraftedAthlete]:
 class Flow:
     """Owns the screen sequence and shared state for one single-device match."""
 
-    def __init__(self, app, feed: MockFeed, pool: list[DraftedAthlete], sim: SimMode) -> None:
+    def __init__(self, app: "App", feed: MockFeed, pool: list[DraftedAthlete],
+                 sim: SimMode) -> None:
         self.app = app
         self.feed = feed
         self.pool = pool
@@ -71,6 +78,7 @@ class Flow:
         self.score_codes: list[str] = []
         self.minute = 0
         self.window = 1
+        self._pending_script: CinematicScript | None = None
         self.app.global_handler = self.sim.handle_global
         self.app.overlay = self.sim.draw_overlay
 
@@ -95,7 +103,7 @@ class Flow:
     def _after_draft(self, selected: list[str]) -> None:
         hand = [a for a in self.pool if a.athlete_id in selected]
         self.session = GameSession(slot=0, roster=Roster(hand), pool=self.pool,
-                                   rng=random.Random(99))
+                                   rng=random.Random(_RNG_SEED))
         self._play_window()
 
     def _play_window(self) -> None:
@@ -103,7 +111,8 @@ class Flow:
         self.app.set_screen(PlayScreen(self.app, available, self._after_predict,
                                        self.log, self.window, self.sim))
 
-    def _after_predict(self, preds, active_id, use_power) -> None:
+    def _after_predict(self, preds: list[Prediction], active_id: str,
+                       use_power: bool) -> None:
         end_min = self.minute + _WINDOW_MIN
         a = self.feed.snapshot_at(self.minute)
         b = self.feed.snapshot_at(end_min)
@@ -145,10 +154,10 @@ class Flow:
             self._play_window()
 
 
-def start_simulation(app, sim_rel_path: str, sim_mode: bool = True) -> None:
+def start_simulation(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:
     feed = ReplayFeed.from_file(sim_rel_path)
     Flow(app, feed, _pool_from_feed(feed), SimMode(sim_mode)).start()
 
 
-def start(app, sim_mode: bool = False) -> None:
+def start(app: "App", sim_mode: bool = False) -> None:
     Flow(app, MockFeed(_demo_script()), _demo_pool(), SimMode(sim_mode)).start()

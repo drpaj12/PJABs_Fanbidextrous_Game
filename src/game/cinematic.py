@@ -6,7 +6,7 @@ displayed value to `value`. EXPLODE/GOAL/CONCEDE beats trigger flashes. The data
 is a dramatization of what resolve_window already computed -- it adds no game logic.
 """
 from dataclasses import dataclass, field
-from src.game.prediction import Prediction, grade
+from src.game.prediction import Grade, Prediction, grade
 from src.game.scoring import ScoreEvent
 
 TICK = "tick"          # a graded prediction is revealed
@@ -36,7 +36,7 @@ class CinematicScript:
     opp_delta: int = 0
 
 
-def _outcome(g) -> str:
+def _outcome(g: Grade) -> str:
     if g.success_credit >= 2:
         return "hit"
     if g.success_credit == 1:

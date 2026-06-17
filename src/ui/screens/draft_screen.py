@@ -4,19 +4,26 @@
 Mobile-first: full-width rows, large touch targets, a zoom panel for the tapped card.
 SIM 'R' auto-drafts roster_size athletes and locks.
 """
+from typing import TYPE_CHECKING, Callable, Optional
+
 import pygame
 from src.ui.screens.base import Screen
 from src.ui.widgets import athlete_card, Button, PlayerDetail, font
 from src.game.athlete import DraftedAthlete
+from src.ui.sim import SimMode
 from src.utils.constants import CONFIG, LAYOUT
+
+if TYPE_CHECKING:
+    from src.ui.app import App
 
 _ROSTER_SIZE = CONFIG["game"]["roster_size"]
 _C = CONFIG["colors"]
 
 
 class DraftScreen(Screen):
-    def __init__(self, app, pool: list[DraftedAthlete], on_lock,
-                 sim=None, title: str = "Draft your six") -> None:
+    def __init__(self, app: "App", pool: list[DraftedAthlete],
+                 on_lock: Callable[..., None], sim: Optional[SimMode] = None,
+                 title: str = "Draft your six") -> None:
         super().__init__(app)
         self.pool = pool
         self.on_lock = on_lock
@@ -42,7 +49,7 @@ class DraftScreen(Screen):
         return pygame.Rect(m, top + i * (h + gap) - self.scroll,
                            self.app.screen.get_width() - 2 * m, h)
 
-    def _card_at(self, pos):
+    def _card_at(self, pos: tuple[int, int]) -> Optional[int]:
         for i in range(len(self.pool)):
             if self._card_rect(i).collidepoint(pos):
                 return i

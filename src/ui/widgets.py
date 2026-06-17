@@ -1,5 +1,6 @@
 # src/ui/widgets.py
 """Mobile-friendly pygame widgets: large touch targets. All pygame lives in src/ui/."""
+import math
 import pygame
 from src.utils.constants import CONFIG, LAYOUT
 
@@ -17,8 +18,9 @@ class Button:
         self.label = label
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
-        pygame.draw.rect(surface, _C["surface"], self.rect, border_radius=12)
-        pygame.draw.rect(surface, _C["border"], self.rect, width=2, border_radius=12)
+        radius = LAYOUT.i("ui_btn_radius", 12)
+        pygame.draw.rect(surface, _C["surface"], self.rect, border_radius=radius)
+        pygame.draw.rect(surface, _C["border"], self.rect, width=2, border_radius=radius)
         text = font.render(self.label, True, _C["text"])
         surface.blit(text, text.get_rect(center=self.rect.center))
 
@@ -34,19 +36,19 @@ class MeterBar:
     def draw(self, surface: pygame.Surface, value: int, threshold: int,
              explode: float = 0.0) -> None:
         """explode in [0,1]: 0 = normal; >0 draws a white flash + radial lines."""
-        pygame.draw.rect(surface, _C["surface"], self.rect, border_radius=8)
+        radius = LAYOUT.i("ui_meter_radius", 8)
+        pygame.draw.rect(surface, _C["surface"], self.rect, border_radius=radius)
         frac = 0 if threshold <= 0 else max(0.0, min(1.0, value / threshold))
         fill = self.rect.copy()
         fill.width = int(self.rect.width * frac)
-        pygame.draw.rect(surface, self.color, fill, border_radius=8)
+        pygame.draw.rect(surface, self.color, fill, border_radius=radius)
         if explode > 0.0:
             flash = pygame.Surface(self.rect.size, pygame.SRCALPHA)
             flash.fill((*_C["white"], int(200 * explode)))
             surface.blit(flash, self.rect.topleft)
             cx, cy = self.rect.center
             for k in range(8):
-                ang = k * 0.7853981633974483       # pi/4
-                import math
+                ang = k * (math.pi / 4)
                 dx = int(math.cos(ang) * 30 * explode)
                 dy = int(math.sin(ang) * 30 * explode)
                 pygame.draw.line(surface, _C["white"], (cx, cy),
@@ -57,8 +59,9 @@ def athlete_card(surface: pygame.Surface, rect: pygame.Rect,
                  font: pygame.font.Font, name: str, archetype: str,
                  stars: int, selected: bool) -> None:
     bg = _C["accent"] if selected else _C["surface"]
-    pygame.draw.rect(surface, bg, rect, border_radius=10)
-    pygame.draw.rect(surface, _C["border"], rect, width=2, border_radius=10)
+    radius = LAYOUT.i("ui_corner_radius", 10)
+    pygame.draw.rect(surface, bg, rect, border_radius=radius)
+    pygame.draw.rect(surface, _C["border"], rect, width=2, border_radius=radius)
     surface.blit(font.render(name[:16], True, _C["white"]), (rect.x + 8, rect.y + 6))
     surface.blit(font.render(f"{archetype}  {'*' * stars}", True, _C["text_dim"]),
                  (rect.x + 8, rect.y + 30))
@@ -81,8 +84,9 @@ class Popup:
         shade = pygame.Surface((sw, sh), pygame.SRCALPHA)
         shade.fill((0, 0, 0, 150))
         surface.blit(shade, (0, 0))
-        pygame.draw.rect(surface, _C["surface"], rect, border_radius=12)
-        pygame.draw.rect(surface, _C["accent"], rect, width=2, border_radius=12)
+        radius = LAYOUT.i("ui_btn_radius", 12)
+        pygame.draw.rect(surface, _C["surface"], rect, border_radius=radius)
+        pygame.draw.rect(surface, _C["accent"], rect, width=2, border_radius=radius)
         tf = font(LAYOUT.i("popup_title_size", 24))
         surface.blit(tf.render(self.title, True, _C["accent"]),
                      (rect.x + pad, rect.y + pad))

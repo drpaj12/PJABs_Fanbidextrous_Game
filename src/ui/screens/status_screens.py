@@ -1,24 +1,29 @@
 # src/ui/screens/status_screens.py
 """Watch (waiting), Reveal (window result), and Final (full-time) screens."""
+from typing import TYPE_CHECKING, Callable, Optional
+
 import pygame
 from src.ui.screens.base import Screen
 from src.ui.widgets import MeterBar
 from src.utils.constants import CONFIG
+
+if TYPE_CHECKING:
+    from src.ui.app import App
 
 _C = CONFIG["colors"]
 _M = CONFIG["meter"]
 
 
 class WatchScreen(Screen):
-    def __init__(self, app, get_state) -> None:
+    def __init__(self, app: "App", get_state: Callable[..., None]) -> None:
         super().__init__(app)
         self.get_state = get_state  # callable -> dict(team, opp, success, concede, window, clock)
         w = app.screen.get_width()
         self.success_bar = MeterBar(pygame.Rect(20, 200, w - 40, 24), _C["green"])
         self.concede_bar = MeterBar(pygame.Rect(20, 260, w - 40, 24), _C["red"])
 
-    def handle(self, event): ...
-    def update(self, dt): ...
+    def handle(self, event: pygame.event.Event) -> None: ...
+    def update(self, dt: float) -> None: ...
 
     def draw(self, surface: pygame.Surface) -> None:
         s = self.get_state()
@@ -33,7 +38,8 @@ class WatchScreen(Screen):
 
 
 class RevealScreen(Screen):
-    def __init__(self, app, lines: list[str], on_continue) -> None:
+    def __init__(self, app: "App", lines: list[str],
+                 on_continue: Callable[..., None]) -> None:
         super().__init__(app)
         self.lines = lines
         self.on_continue = on_continue
@@ -42,7 +48,7 @@ class RevealScreen(Screen):
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.on_continue()
 
-    def update(self, dt): ...
+    def update(self, dt: float) -> None: ...
 
     def draw(self, surface: pygame.Surface) -> None:
         f = self.app.font
@@ -53,8 +59,8 @@ class RevealScreen(Screen):
 
 
 class FinalScreen(Screen):
-    def __init__(self, app, team: int, opp: int, real_line: str | None,
-                 on_continue=None) -> None:
+    def __init__(self, app: "App", team: int, opp: int, real_line: str | None,
+                 on_continue: Optional[Callable[..., None]] = None) -> None:
         super().__init__(app)
         self.team, self.opp, self.real_line = team, opp, real_line
         self.on_continue = on_continue
@@ -63,7 +69,7 @@ class FinalScreen(Screen):
         if self.on_continue and event.type == pygame.MOUSEBUTTONDOWN:
             self.on_continue()
 
-    def update(self, dt): ...
+    def update(self, dt: float) -> None: ...
 
     def draw(self, surface: pygame.Surface) -> None:
         from src.utils.constants import LAYOUT

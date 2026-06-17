@@ -4,12 +4,18 @@
 on_submit(preds: list[Prediction], active_id: str, use_power: bool) fires on Lock.
 The countdown is cosmetic in SIM/single-device play; it does not force submission.
 """
+from typing import TYPE_CHECKING, Callable, Optional
+
 import pygame
 from src.ui.screens.base import Screen
 from src.ui.widgets import Button, LogList, athlete_card, font
 from src.game.prediction import Prediction
 from src.game.athlete import DraftedAthlete
+from src.ui.sim import SimMode
 from src.utils.constants import CONFIG, LAYOUT, load_data
+
+if TYPE_CHECKING:
+    from src.ui.app import App
 
 _C = CONFIG["colors"]
 _MAX = CONFIG["game"]["max_predictions_per_window"]
@@ -17,8 +23,9 @@ _STATS = load_data(CONFIG["assets"]["stats_menu_file"])["stats"]
 
 
 class PlayScreen(Screen):
-    def __init__(self, app, available: list[DraftedAthlete], on_submit,
-                 log: LogList, window: int, sim=None) -> None:
+    def __init__(self, app: "App", available: list[DraftedAthlete],
+                 on_submit: Callable[..., None], log: LogList, window: int,
+                 sim: Optional[SimMode] = None) -> None:
         super().__init__(app)
         self.available = available
         self.on_submit = on_submit
