@@ -1,18 +1,15 @@
-"""
-Entry point -- keep this file small.
-All game logic lives in src/game/.
-All rendering lives in src/ui/.
-"""
-
+# src/main.py
+"""Desktop entry point."""
 import asyncio
-import sys
-import os
+from src.ui.app import App
+from src.ui import demo_flow
 
-# Make sure imports resolve from the project root
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ui.game_window import run
+async def main() -> None:
+    app = App()
+    demo_flow.start(app)
+    await app.run()
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())
