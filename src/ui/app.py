@@ -17,6 +17,8 @@ class App:
         self.font = pygame.font.SysFont("arial", 22)
         self.running = True
         self.current = None  # set by set_screen
+        self.overlay = None          # callable(surface) drawn on top each frame
+        self.global_handler = None   # callable(event) -> bool, consumes before screen
 
     def set_screen(self, screen) -> None:
         self.current = screen
@@ -28,11 +30,14 @@ class App:
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif self.current is not None:
-                    self.current.handle(event)
+                    if not (self.global_handler and self.global_handler(event)):
+                        self.current.handle(event)
             if self.current is not None:
                 self.current.update(dt)
             self.screen.fill(_C["background"])
             if self.current is not None:
                 self.current.draw(self.screen)
+            if self.overlay is not None:
+                self.overlay(self.screen)
             pygame.display.flip()
             await asyncio.sleep(0)
