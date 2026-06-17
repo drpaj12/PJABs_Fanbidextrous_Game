@@ -2,6 +2,7 @@
 """Single-device demo: MockFeed + one GameSession, walking draft -> predict -> watch -> final."""
 import random
 from src.game.mock_feed import MockFeed
+from src.game.replay_feed import ReplayFeed
 from src.game.athlete import DraftedAthlete
 from src.game.roster import Roster
 from src.game.session import GameSession
@@ -37,9 +38,25 @@ def _demo_script() -> dict:
     }
 
 
+def _pool_from_feed(feed: MockFeed) -> list[DraftedAthlete]:
+    """Build the draft pool from a feed's recorded lineups (real match rosters)."""
+    return [DraftedAthlete.create(athlete_id=r["athlete_id"], name=r["name"],
+            broad_position=r["broad_position"], team=r["team"], jersey=int(r["jersey"]))
+            for r in feed.lineups()]
+
+
+def start_simulation(app, sim_rel_path: str) -> None:
+    """Play a recorded real match (StatsBomb simulation file) on a single device."""
+    feed = ReplayFeed.from_file(sim_rel_path)
+    _start_with(app, feed, _pool_from_feed(feed))
+
+
 def start(app) -> None:
-    pool = _demo_pool()
-    feed = MockFeed(_demo_script())
+    """Default single-device demo against the canned MockFeed."""
+    _start_with(app, MockFeed(_demo_script()), _demo_pool())
+
+
+def _start_with(app, feed: MockFeed, pool: list[DraftedAthlete]) -> None:
     state = {"window": 1, "minute": 0}
 
     def after_draft(selected: list[str]) -> None:

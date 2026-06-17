@@ -28,20 +28,26 @@ be picked up by subagent-driven-development.
 Goal: drive the game off a recorded real match timeline (replayed minute-by-minute as
 if live) so the full loop can be exercised and tuned without waiting for a live fixture.
 
-- [ ] **B1. Decide the data source** (see "World Cup events data" section below).
-  Default recommendation: try API-Football historical first (zero new schema work);
-  fall back to StatsBomb open data (free, unlimited, but needs an adapter).
-- [ ] **B2. Capture one or two full World Cup matches** into `tests/fixtures/`
-  (events + lineups + statistics if API-Football; or raw StatsBomb event JSON).
-  Reuse / extend `scripts/capture_fixtures.py`.
-- [ ] **B3. Build a `ReplayFeed`** (same interface as `MockFeed`: `snapshot_at(minute)`)
-  that steps through the captured timeline, accumulating per-stat counts up to each
-  minute. Pure Python, lives in `src/game/`, fully unit-tested.
-- [ ] **B4. (Only if StatsBomb)** write a thin StatsBomb-event -> engine-stat adapter
-  (map StatsBomb event types to corner / shot / save / goal / card counts). The engine
-  is already sport-agnostic, so this is an isolated adapter, not an engine change.
-- [ ] **B5. Add a "replay demo" entry path** alongside the existing mock demo so the
-  game can be played start-to-finish against a real recorded match.
+- [x] **B1. Data source chosen: StatsBomb open data** (Option 2). Free, no key, no rate
+  limit; includes the full FIFA World Cup 2018.
+- [x] **B2. Captured three iconic WC2018 matches** (the build script fetches them on demand;
+  the generated simulation files are committed under `assets/data/simulations/`):
+  Final France 4-2 Croatia, Semi France 1-0 Belgium, Quarter Brazil 1-2 Belgium. All three
+  reconcile to their real final scores. Builder: `scripts/build_simulation_from_statsbomb.py`.
+- [x] **B3. `ReplayFeed`** built (`src/game/replay_feed.py`) -- a thin `MockFeed` subclass
+  that loads a simulation file and exposes `meta`. Unit-tested (`tests/test_replay_feed.py`).
+- [x] **B4. StatsBomb -> engine adapter** built as a pure module
+  (`src/game/statsbomb_adapter.py`): maps shots/saves/corners/cards/own-goals into the five
+  engine stat fields, folds accents to ASCII, prefers player nicknames. Unit-tested
+  (`tests/test_statsbomb_adapter.py`). Goals are now genuinely sourced here (own-goals +
+  scored shots), independent of the unavailable live statistics endpoint.
+- [x] **B5. Replay entry path** wired: `demo_flow.start_simulation(app, path)` builds the
+  pool from the real recorded lineups; desktop `src/main.py --sim <slug>` plays a match.
+  Web entry stays on the canned MockFeed demo. Verified end-to-end headless (22-player real
+  pool, 20 windows across the full 90+ minutes).
+
+  Remaining polish (optional): an in-game match picker UI to choose among the three sims,
+  and shortening the 18-20 window replay (e.g. larger windows) if the full match feels long.
 
 ---
 
