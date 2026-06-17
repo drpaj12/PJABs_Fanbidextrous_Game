@@ -53,17 +53,29 @@ class RevealScreen(Screen):
 
 
 class FinalScreen(Screen):
-    def __init__(self, app, team: int, opp: int, real_line: str | None) -> None:
+    def __init__(self, app, team: int, opp: int, real_line: str | None,
+                 on_continue=None) -> None:
         super().__init__(app)
         self.team, self.opp, self.real_line = team, opp, real_line
+        self.on_continue = on_continue
 
-    def handle(self, event): ...
+    def handle(self, event: pygame.event.Event) -> None:
+        if self.on_continue and event.type == pygame.MOUSEBUTTONDOWN:
+            self.on_continue()
+
     def update(self, dt): ...
 
     def draw(self, surface: pygame.Surface) -> None:
-        big = pygame.font.SysFont("arial", 48)
-        surface.blit(big.render("Full Time", True, _C["white"]), (20, 80))
-        surface.blit(big.render(f"You {self.team} - {self.opp} Opp", True, _C["accent"]),
-                     (20, 150))
+        from src.utils.constants import LAYOUT
+        from src.ui.widgets import font
+        sw = surface.get_width()
+        big = font(LAYOUT.i("final_title_size", 44))
+        t = big.render("Full Time", True, _C["white"])
+        surface.blit(t, t.get_rect(center=(sw // 2, 200)))
+        sc = font(LAYOUT.i("final_score_size", 40))
+        s = sc.render(f"You {self.team} - {self.opp} Opp", True, _C["accent"])
+        surface.blit(s, s.get_rect(center=(sw // 2, 300)))
         if self.real_line:
-            surface.blit(self.app.font.render(self.real_line, True, _C["text_dim"]), (20, 230))
+            rf = font(LAYOUT.i("ui_small_size", 17))
+            r = rf.render(self.real_line, True, _C["text_dim"])
+            surface.blit(r, r.get_rect(center=(sw // 2, 370)))
