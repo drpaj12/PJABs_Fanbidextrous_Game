@@ -31,3 +31,22 @@ CONFIG: dict[str, Any] = _load_json("config/game_config.json")
 def load_data(rel_path: str) -> dict[str, Any]:
     """Load a JSON data file by repo-relative path (e.g. assets/data/powers.json)."""
     return _load_json(rel_path)
+
+
+class Layout:
+    """Named UI geometry values with defaults. Loaded once. No magic numbers in UI."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    def param(self, key: str, default: Any = 0) -> Any:
+        return self._data.get(key, default)
+
+    def i(self, key: str, default: int = 0) -> int:
+        return int(self._data.get(key, default))
+
+    def f(self, key: str, default: float = 0.0) -> float:
+        return float(self._data.get(key, default))
+
+
+LAYOUT: Layout = Layout(_load_json("config/layout_config.json"))
