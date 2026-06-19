@@ -43,6 +43,7 @@ _HALFTIME_LABEL = CONFIG["game"]["halftime_label"]
 _ET_LABEL = CONFIG["game"]["extra_time_label"]
 _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
+_PREGAME = CONFIG["pregame"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -123,9 +124,9 @@ class Flow:
     def _fixture(self) -> dict:
         meta = getattr(self.feed, "meta", {})
         return {
-            "home": meta.get("home_team", "Canada"),
-            "away": meta.get("away_team", "Opponent"),
-            "competition": meta.get("competition", "Friendly"),
+            "home": meta.get("home_team", _PREGAME["default_home_team"]),
+            "away": meta.get("away_team", _PREGAME["default_away_team"]),
+            "competition": meta.get("competition", _PREGAME["default_competition"]),
             "label": _HALF_LABEL,
         }
 

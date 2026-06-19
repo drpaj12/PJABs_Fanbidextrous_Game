@@ -31,7 +31,8 @@ class PregameScreen(Screen):
         bh = LAYOUT.i("pregame_btn_h", 64)
         x = (sw - bw) // 2
         self.start_btn = Button(
-            pygame.Rect(x, LAYOUT.i("pregame_btn_y", 700), bw, bh), "Start First Half")
+            pygame.Rect(x, LAYOUT.i("pregame_btn_y", 700), bw, bh),
+            CONFIG["pregame"]["start_button_label"])
 
     def handle(self, event: pygame.event.Event) -> None:
         if event.type == pygame.MOUSEBUTTONDOWN and self.start_btn.hit(event.pos):

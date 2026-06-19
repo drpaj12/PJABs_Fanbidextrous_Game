@@ -51,6 +51,12 @@
     "poll_seconds": 120,
     "halftime_status": "halftime"
   },
+  "pregame": {
+    "start_button_label": "Start First Half",
+    "default_home_team": "Canada",
+    "default_away_team": "Opponent",
+    "default_competition": "Friendly"
+  },
   "relay": {
     "base_url": "https://drpeterjamieson.com/game",
     "api_path": "/soccer_api.php",
