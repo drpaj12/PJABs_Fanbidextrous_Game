@@ -11,6 +11,8 @@ import random
 from typing import TYPE_CHECKING, Optional
 from src.game.mock_feed import MockFeed
 from src.game.replay_feed import ReplayFeed
+from src.game.live_feed import LiveFeed
+from src.game.live_schedule import LivePlan, live_plan
 from src.game.athlete import DraftedAthlete
 from src.game.prediction import Prediction
 from src.game.roster import Roster
@@ -19,6 +21,7 @@ from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
 from src.game.half_clock import HalfClock
 from src.game.window_report import WindowReport, build_window_report
+from src.sync.feed_client import FeedClient
 from src.ui.sim import SimMode
 from src.ui.screens.splash import SplashScreen
 from src.ui.screens.room import RoomScreen
@@ -27,6 +30,7 @@ from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen
+from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.utils.constants import CONFIG, load_data
 
 if TYPE_CHECKING:
@@ -42,8 +46,10 @@ _HALF_LABEL = CONFIG["game"]["half_label"]
 _HALFTIME_LABEL = CONFIG["game"]["halftime_label"]
 _ET_LABEL = CONFIG["game"]["extra_time_label"]
 _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
+_POLL_SECONDS = CONFIG["feed"]["poll_seconds"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
 _PREGAME = CONFIG["pregame"]
+_LIVE = CONFIG["live"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -197,6 +203,98 @@ class Flow:
         else:
             self.window += 1
             self._play_window()
+
+
+class LiveFlow(Flow):
+    """A live half: drives windows from a live_plan's remaining-window list, and waits on
+    the wall clock (polling the relay) between locking predictions and resolving each
+    window. Reuses Flow's splash -> room -> pre-game -> draft and the resolve/cinematic
+    machinery; only the window iteration and the "play it out, then resolve" gap differ."""
+
+    def __init__(self, app: "App", feed: LiveFeed, feed_client: FeedClient,
+                 fixture_id: int, pool: list[DraftedAthlete], plan: LivePlan,
+                 sim: SimMode) -> None:
+        super().__init__(app, feed, pool, sim)
+        self.feed_client = feed_client
+        self.fixture_id = fixture_id
+        self._scored = plan.scored_windows
+        self._idx = 0
+
+    def _fixture(self) -> dict:
+        return {
+            "home": self.feed.home_team() or _PREGAME["default_home_team"],
+            "away": self.feed.away_team() or _PREGAME["default_away_team"],
+            "competition": _LIVE["competition_label"],
+            "label": _HALF_LABEL,
+        }
+
+    def _after_draft(self, selected: list[str]) -> None:
+        self.window = self._scored[self._idx]
+        super()._after_draft(selected)
+
+    def _window_actuals(self) -> dict[str, int]:
+        # As Flow, but a live Extra-Time window resolves over everything polled so far
+        # (the live status would otherwise short-circuit the parent's minute-by-minute scan).
+        start = self.clock.window_start(self.window)
+        if self.clock.is_extra_time(self.window):
+            end = self.feed.last_known_minute()
+        else:
+            end = self.clock.window_end(self.window)
+        a = self.feed.snapshot_at(start)
+        b = self.feed.snapshot_at(end)
+        from src.game.normalize_soccer import actuals_from_raw
+        raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
+        return actuals_from_raw(raw, _STATS_MENU)
+
+    def _after_predict(self, preds: list[Prediction], active_id: str,
+                       use_power: bool) -> None:
+        # Lock the picks, then wait out the window on the wall clock before resolving.
+        target = None if self.clock.is_extra_time(self.window) \
+            else self.clock.window_end(self.window)
+
+        def resolve() -> None:
+            Flow._after_predict(self, preds, active_id, use_power)
+
+        self.app.set_screen(LiveWaitScreen(
+            self.app, self.feed, self.feed_client, self.fixture_id,
+            target_minute=target, on_ready=resolve, poll_seconds=_POLL_SECONDS,
+            sim=self.sim))
+
+    def _after_cinematic(self) -> None:
+        team, opp = aggregate(self.score_codes)
+        self._idx += 1
+        if self._idx >= len(self._scored):
+            self.app.set_screen(FinalScreen(self.app, team, opp, None,
+                                            title=_HALFTIME_LABEL))
+        else:
+            self.window = self._scored[self._idx]
+            self._play_window()
+
+
+def start_live(app: "App", fixture_id: int, sim_mode: bool = False) -> None:
+    """Live single-player half. Park on a waiting screen until the API publishes the
+    starting XI, then size the half from the live match clock and run the draft + windows."""
+    feed = LiveFeed()
+    feed_client = FeedClient(CONFIG["relay"]["base_url"],
+                             feed_path=CONFIG["relay"]["feed_path"])
+    sim = SimMode(sim_mode)
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+
+    def begin() -> None:
+        clock = HalfClock(_HALF_MIN, _WINDOW_MIN)
+        plan = live_plan(feed.current_minute(), feed.match_status(), clock)
+        if not plan.scored_windows:
+            app.set_screen(FinalScreen(app, 0, 0, "First half already over",
+                                       title=_HALFTIME_LABEL))
+            return
+        pool = _pool_from_feed(feed)
+        LiveFlow(app, feed, feed_client, fixture_id, pool, plan, sim).start()
+
+    app.set_screen(LiveWaitScreen(app, feed, feed_client, fixture_id,
+                                  target_minute=None, on_ready=begin,
+                                  poll_seconds=_POLL_SECONDS, sim=sim,
+                                  wait_for_lineups=True))
 
 
 def start_simulation(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:

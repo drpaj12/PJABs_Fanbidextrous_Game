@@ -21,6 +21,8 @@ class LiveFeed:
         self._lineups_raw: dict = {"response": []}
         self._status_short: str = "NS"
         self._elapsed: int = 0
+        self._home_team: str = ""
+        self._away_team: str = ""
         if snapshot is not None:
             self.record(snapshot)
 
@@ -35,6 +37,13 @@ class LiveFeed:
             self._status_short = status["short"]
         if status.get("elapsed") is not None:
             self._elapsed = int(status["elapsed"])
+        teams = fixture.get("teams") or {}
+        home_name = (teams.get("home") or {}).get("name")
+        away_name = (teams.get("away") or {}).get("name")
+        if home_name:
+            self._home_team = home_name
+        if away_name:
+            self._away_team = away_name
         lineups = snapshot.get("lineups") or {}
         if lineups.get("response"):
             self._lineups_raw = lineups
@@ -89,3 +98,11 @@ class LiveFeed:
     def has_lineups(self) -> bool:
         """True once the API has published a starting XI (drafting can begin)."""
         return bool(self._lineups_raw.get("response"))
+
+    def home_team(self) -> str:
+        """Home team name from the fixture payload (empty until first poll)."""
+        return self._home_team
+
+    def away_team(self) -> str:
+        """Away team name from the fixture payload (empty until first poll)."""
+        return self._away_team

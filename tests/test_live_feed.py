@@ -79,3 +79,9 @@ def test_empty_poll_does_not_wipe_seen_lineups():
     feed = LiveFeed(_snap("1H", 10, 1, 1, 0, 0, 0))
     feed.record(_snap("1H", 15, 2, 2, 1, 0, 0, lineups=False))  # later poll, lineups dropped
     assert feed.has_lineups() is True
+
+
+def test_team_names_from_fixture():
+    feed = LiveFeed(_snap("1H", 10, 1, 1, 0, 0, 0))
+    assert feed.home_team() == "Canada"
+    assert feed.away_team() == "X"
