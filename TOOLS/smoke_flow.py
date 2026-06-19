@@ -9,6 +9,10 @@ no exception inside a bounded number of frames.
 import os
 import sys
 
+# Allow running directly (python TOOLS/smoke_flow.py) -- put the repo root, not
+# TOOLS/, on sys.path so `import src...` resolves the same way pytest does.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
