@@ -108,3 +108,28 @@ read titles from `ReplayFeed.meta`; the demo MockFeed uses a default fixture.
 The live web deployment itself -- API-Football key placement, PHP relay/proxy
 deploy, two-client sync, pygbag HTML clients. Tracked as the follow-on task; the
 LiveFeed adapter slots into the same EventFeed interface this design preserves.
+
+### Deployment layout (recorded for the follow-on task)
+
+Everything lives under **`drpeterjamieson.com/PROJECTS/PREDICTOR/`** -- keys,
+scripts, pygbag build, all of it. Layout:
+
+```
+PROJECTS/PREDICTOR/
+  index.html              <- 404-style page (deters directory browsing)
+  <pygbag build files>    <- the web clients
+  PHP_SCRIPTS/
+    index.html            <- 404-style page
+    apifootball_key.txt   <- server-side only, never web-served
+    soccer_api.php
+    feed_cache.php
+    sync.php
+```
+
+- Every directory gets an `index.html` that renders a 404-style "Not Found" page
+  so the directory contents are not browsable. (A true HTTP 404 status would need
+  an `.htaccess` rule; the index page is the baseline obscurity measure.)
+- Relay endpoints therefore become
+  `https://drpeterjamieson.com/PROJECTS/PREDICTOR/PHP_SCRIPTS/sync.php` (and
+  `soccer_api.php`, `feed_cache.php`). The client `relay.base_url` config points
+  here. (Supersedes the older `/game/` path noted in CLAUDE.md.)
