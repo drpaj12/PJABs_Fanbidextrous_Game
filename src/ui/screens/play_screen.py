@@ -37,13 +37,15 @@ class PlayScreen(Screen):
     def __init__(self, app: "App", available: list[DraftedAthlete],
                  on_submit: Callable[..., None], window: int,
                  sim: Optional[SimMode] = None,
-                 last_report: Optional[WindowReport] = None) -> None:
+                 last_report: Optional[WindowReport] = None,
+                 phase_label: Optional[str] = None) -> None:
         super().__init__(app)
         self.available = available
         self.on_submit = on_submit
         self.window = window
         self.sim = sim
         self.last_report = last_report
+        self.phase_label = phase_label
         self.lines = {s["code"]: s["default_line"] for s in _STATS}
         self.locked: set[str] = set()    # green: committed for this window
         self.touched: set[str] = set()   # orange: adjusted but not yet locked
@@ -211,7 +213,8 @@ class PlayScreen(Screen):
     def draw(self, surface: pygame.Surface) -> None:
         m = LAYOUT.i("screen_margin", 20)
         hf = font(LAYOUT.i("play_window_size", 20))
-        surface.blit(hf.render(f"Window {self.window}", True, _C["text_dim"]), (m, 16))
+        header = self.phase_label if self.phase_label else f"Window {self.window}"
+        surface.blit(hf.render(header, True, _C["text_dim"]), (m, 16))
         tf = font(LAYOUT.i("play_timer_size", 30))
         mm, ss = divmod(int(self.remaining), 60)
         surface.blit(tf.render(f"{mm}:{ss:02d}", True, _C["accent"]), (m, 44))

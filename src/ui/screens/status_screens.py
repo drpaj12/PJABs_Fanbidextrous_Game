@@ -60,10 +60,12 @@ class RevealScreen(Screen):
 
 class FinalScreen(Screen):
     def __init__(self, app: "App", team: int, opp: int, real_line: str | None,
-                 on_continue: Optional[Callable[..., None]] = None) -> None:
+                 on_continue: Optional[Callable[..., None]] = None,
+                 title: str = "Full Time") -> None:
         super().__init__(app)
         self.team, self.opp, self.real_line = team, opp, real_line
         self.on_continue = on_continue
+        self.title = title
 
     def handle(self, event: pygame.event.Event) -> None:
         if self.on_continue and event.type == pygame.MOUSEBUTTONDOWN:
@@ -76,7 +78,7 @@ class FinalScreen(Screen):
         from src.ui.widgets import font
         sw = surface.get_width()
         big = font(LAYOUT.i("final_title_size", 44))
-        t = big.render("Full Time", True, _C["white"])
+        t = big.render(self.title, True, _C["white"])
         surface.blit(t, t.get_rect(center=(sw // 2, 200)))
         sc = font(LAYOUT.i("final_score_size", 40))
         s = sc.render(f"You {self.team} - {self.opp} Opp", True, _C["accent"])
