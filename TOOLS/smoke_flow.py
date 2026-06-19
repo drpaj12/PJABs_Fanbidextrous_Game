@@ -17,6 +17,7 @@ from src.ui.app import App
 from src.ui import flow
 from src.ui.screens.splash import SplashScreen
 from src.ui.screens.room import RoomScreen
+from src.ui.screens.pregame_screen import PregameScreen
 from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
@@ -39,6 +40,8 @@ def _drive(screen, sim) -> list[pygame.event.Event]:
         return [_key(pygame.K_s)]
     if isinstance(screen, RoomScreen):
         return []  # auto-creates on update once popup is gone
+    if isinstance(screen, PregameScreen):
+        return []  # auto-advances on update in SIM
     if isinstance(screen, DraftScreen):
         return [_key(pygame.K_r)]  # auto-draft 6 + lock
     if isinstance(screen, PlayScreen):
@@ -69,10 +72,12 @@ def main() -> int:
             windows_played += 1
         prev = cur
         if isinstance(cur, FinalScreen):
-            print("OK reached FinalScreen at frame", frame)
+            ok = windows_played == 10  # 9 regular + 1 extra time
+            print(("OK" if ok else "FAIL"), "reached FinalScreen at frame", frame)
             print("OK screens seen:", sorted(seen))
-            print("OK play windows entered:", windows_played)
-            return 0
+            print(("OK" if ok else "FAIL"), "play windows entered:", windows_played,
+                  "(expected 10)")
+            return 0 if ok else 1
 
         for ev in _drive(cur, sim):
             if not (app.global_handler and app.global_handler(ev)):
