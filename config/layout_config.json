@@ -29,6 +29,15 @@
   "room_btn_y": 360,
   "room_code_size": 48,
 
+  "pregame_title_size": 30,
+  "pregame_title_y": 140,
+  "pregame_line_size": 22,
+  "pregame_line_gap": 40,
+  "pregame_lines_y": 300,
+  "pregame_btn_w": 320,
+  "pregame_btn_h": 64,
+  "pregame_btn_y": 700,
+
   "draft_list_top": 80,
   "draft_card_h": 64,
   "draft_card_gap": 8,
