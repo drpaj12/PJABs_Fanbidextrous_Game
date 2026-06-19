@@ -58,9 +58,14 @@
     "default_competition": "Friendly"
   },
   "relay": {
-    "base_url": "https://drpeterjamieson.com/game",
+    "base_url": "https://drpeterjamieson.com/PROJECTS/PREDICTOR/PHP_SCRIPTS",
     "api_path": "/soccer_api.php",
     "feed_path": "/feed_cache.php"
+  },
+  "live": {
+    "_comment": "fixture_id resolved from API-Football once a valid key is in place",
+    "fixture_id": null,
+    "competition_label": "FIFA World Cup 2026"
   },
   "assets": {
     "data_dir": "assets/data",

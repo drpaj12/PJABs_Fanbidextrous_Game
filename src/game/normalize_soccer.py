@@ -1,8 +1,26 @@
 # src/game/normalize_soccer.py
 """Pure normalization of API-Football v3 JSON into engine models. No network here."""
+from typing import Iterable
 from src.game.athlete import DraftedAthlete
+from src.utils.constants import CONFIG
 
 _POS_MAP = {"G": "Goalkeeper", "D": "Defender", "M": "Midfielder", "F": "Attacker"}
+
+# API-Football fixture status short codes -> engine status vocabulary. The single place
+# the API's status names meet the engine's. Unknown codes default to "live".
+_STATUS_MAP = {
+    "TBD": "scheduled", "NS": "scheduled", "PST": "scheduled", "CANC": "finished",
+    "1H": "live", "2H": "live", "ET": "live", "BT": "live", "P": "live",
+    "LIVE": "live", "INT": "live", "SUSP": "live",
+    "HT": CONFIG["feed"]["halftime_status"],
+    "FT": "finished", "AET": "finished", "PEN": "finished", "ABD": "finished",
+    "AWD": "finished", "WO": "finished",
+}
+
+
+def map_status(short: str) -> str:
+    """Map an API-Football fixture status short code to the engine's status string."""
+    return _STATUS_MAP.get((short or "").upper(), "live")
 _STAT_FIELD = {
     "Corner Kicks": "corner_kicks",
     "Shots on Goal": "shots_on_goal",
@@ -22,11 +40,14 @@ def _athlete(player: dict, team_name: str) -> DraftedAthlete:
         broad_position=broad, team=team_name, jersey=p.get("number") or 0)
 
 
-def parse_lineups(data: dict) -> list[DraftedAthlete]:
+def parse_lineups(data: dict,
+                  groups: Iterable[str] = ("startXI", "substitutes")) -> list[DraftedAthlete]:
+    """Flatten API-Football lineups into athletes. `groups` selects which player lists to
+    include; the live feed passes ("startXI",) to draft only the 22 starters."""
     out: list[DraftedAthlete] = []
     for team_block in data.get("response", []):
         team_name = team_block.get("team", {}).get("name", "")
-        for group in ("startXI", "substitutes"):
+        for group in groups:
             for player in team_block.get(group, []) or []:
                 out.append(_athlete(player, team_name))
     return out

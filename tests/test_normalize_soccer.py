@@ -45,3 +45,24 @@ def test_parse_statistics_sums_yellow_and_red_into_cards():
         {"type": "Red Cards", "value": 1},
     ]}]}
     assert parse_statistics(data)["cards"] == 3
+
+
+def test_map_status_to_engine_vocabulary():
+    from src.game.normalize_soccer import map_status
+    from src.utils.constants import CONFIG
+    assert map_status("HT") == CONFIG["feed"]["halftime_status"]
+    assert map_status("1H") == "live"
+    assert map_status("2H") == "live"
+    assert map_status("NS") == "scheduled"
+    assert map_status("FT") == "finished"
+    assert map_status("AET") == "finished"
+    assert map_status("") == "live"        # unknown defaults to live
+    assert map_status("weird") == "live"
+
+
+def test_parse_lineups_groups_filter_startxi_only():
+    data = json.loads((FIX / "apifootball_lineups_sample.json").read_text())
+    starters = parse_lineups(data, groups=("startXI",))
+    ids = {a.athlete_id for a in starters}
+    assert "sccr-501" in ids
+    assert "sccr-503" not in ids   # the substitute is excluded
