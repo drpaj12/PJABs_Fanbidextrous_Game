@@ -7,6 +7,12 @@
 """
 import asyncio
 import sys
+from pathlib import Path
+
+# Allow `python src/main.py` (run by path) to find the `src` package: the project
+# root is this file's grandparent. Harmless under `-m src.main` / PYTHONPATH too.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from src.ui.app import App
 from src.ui import flow
 
