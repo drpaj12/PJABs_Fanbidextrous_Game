@@ -3,12 +3,17 @@
 
 on_submit(preds: list[Prediction], active_id: str, use_power: bool) fires on Lock.
 The countdown is cosmetic in SIM/single-device play; it does not force submission.
+
+Mobile layout: the header, result log, and Lock button are pinned. The stat steppers
+and player picker live in a clipped viewport between them that scrolls via the on-screen
+up/down buttons (or the mouse wheel on desktop), so every control is reachable on a
+414x896 phone canvas no matter how many players are in the hand.
 """
 from typing import TYPE_CHECKING, Callable, Optional
 
 import pygame
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, LogList, athlete_card, font
+from src.ui.widgets import Button, LogList, ScrollButtons, athlete_card, font
 from src.game.prediction import Prediction
 from src.game.athlete import DraftedAthlete
 from src.ui.sim import SimMode
@@ -37,27 +42,47 @@ class PlayScreen(Screen):
         self.active_id: str | None = None
         self.use_power = False
         self.remaining = float(CONFIG["game"]["window_seconds"])
+        self.scroll = 0
         sw, sh = app.screen.get_size()
         m = LAYOUT.i("screen_margin", 20)
         self.lock_btn = Button(
             pygame.Rect(m, sh - LAYOUT.i("play_lock_btn_h", 56) - 12,
                         sw - 2 * m, LAYOUT.i("play_lock_btn_h", 56)),
             "Lock predictions")
+        self.scroll_btns = ScrollButtons(self._viewport())
 
-    # -- geometry --
-    def _stat_top(self) -> int:
-        return LAYOUT.i("play_log_top", 100) + LAYOUT.i("play_log_h", 360) + 12
+    # -- geometry: header + log + Lock are pinned; the rest scrolls in a viewport --
+    def _viewport(self) -> pygame.Rect:
+        m = LAYOUT.i("screen_margin", 20)
+        top = (LAYOUT.i("play_log_top", 76) + LAYOUT.i("play_log_h", 150)
+               + LAYOUT.i("play_content_gap", 12))
+        bottom = self.lock_btn.rect.top - 8
+        return pygame.Rect(m, top, self.app.screen.get_width() - 2 * m, bottom - top)
+
+    def _content_w(self) -> int:
+        return self._viewport().width - ScrollButtons.gutter()
+
+    def _content_h(self) -> int:
+        srow = LAYOUT.i("play_stat_row_h", 52) + 6
+        prow = LAYOUT.i("play_player_row_h", 52) + LAYOUT.i("play_player_gap", 8)
+        return len(_STATS) * srow + 8 + len(self.available) * prow + 8
+
+    def _max_scroll(self) -> int:
+        return max(0, self._content_h() - self._viewport().height)
+
+    def _to_screen(self, content_rect: pygame.Rect) -> pygame.Rect:
+        vp = self._viewport()
+        return content_rect.move(vp.x, vp.top - self.scroll)
 
     def _stat_rect(self, i: int) -> pygame.Rect:
-        m = LAYOUT.i("screen_margin", 20)
         h = LAYOUT.i("play_stat_row_h", 52)
-        return pygame.Rect(m, self._stat_top() + i * (h + 6),
-                           self.app.screen.get_width() - 2 * m, h)
+        return self._to_screen(pygame.Rect(0, i * (h + 6), self._content_w(), h))
 
     def _player_rect(self, j: int) -> pygame.Rect:
-        m = LAYOUT.i("screen_margin", 20)
-        base = self._stat_top() + len(_STATS) * (LAYOUT.i("play_stat_row_h", 52) + 6) + 8
-        return pygame.Rect(m, base + j * 60, self.app.screen.get_width() - 2 * m, 52)
+        base = len(_STATS) * (LAYOUT.i("play_stat_row_h", 52) + 6) + 8
+        h = LAYOUT.i("play_player_row_h", 52)
+        gap = LAYOUT.i("play_player_gap", 8)
+        return self._to_screen(pygame.Rect(0, base + j * (h + gap), self._content_w(), h))
 
     # -- input --
     def handle(self, event: pygame.event.Event) -> None:
@@ -69,7 +94,19 @@ class PlayScreen(Screen):
             self._auto_pick()
             self._submit()
             return
+        if event.type == pygame.MOUSEWHEEL:
+            if self._viewport().collidepoint(pygame.mouse.get_pos()):
+                self.scroll = max(0, min(self._max_scroll(), self.scroll - event.y * 40))
+            return
         if event.type != pygame.MOUSEBUTTONDOWN:
+            return
+        if self.scroll_btns.contains(event.pos):
+            self.scroll = self.scroll_btns.handle(event, self.scroll, self._max_scroll())
+            return
+        if self.lock_btn.hit(event.pos):
+            self._submit()
+            return
+        if not self._viewport().collidepoint(event.pos):
             return
         for i, s in enumerate(_STATS):
             r = self._stat_rect(i)
@@ -85,8 +122,6 @@ class PlayScreen(Screen):
             if self._player_rect(j).collidepoint(event.pos):
                 self.active_id = ath.athlete_id
                 return
-        if self.lock_btn.hit(event.pos):
-            self._submit()
 
     def _toggle(self, code: str) -> None:
         if code in self.chosen:
@@ -115,6 +150,10 @@ class PlayScreen(Screen):
         mm, ss = divmod(int(self.remaining), 60)
         surface.blit(tf.render(f"{mm}:{ss:02d}", True, _C["accent"]), (m, 44))
         self.log.draw(surface)
+
+        vp = self._viewport()
+        prev = surface.get_clip()
+        surface.set_clip(vp)
         sf = font(LAYOUT.i("play_stat_size", 20))
         for i, s in enumerate(_STATS):
             r = self._stat_rect(i)
@@ -127,4 +166,8 @@ class PlayScreen(Screen):
         for j, ath in enumerate(self.available):
             athlete_card(surface, self._player_rect(j), sf, ath.name, ath.archetype,
                          ath.stars, ath.athlete_id == self.active_id)
+        surface.set_clip(prev)
+
+        if self._max_scroll() > 0:
+            self.scroll_btns.draw(surface, self.scroll, self._max_scroll())
         self.lock_btn.draw(surface, sf)

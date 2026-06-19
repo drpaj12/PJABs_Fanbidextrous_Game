@@ -28,6 +28,55 @@ class Button:
         return self.rect.collidepoint(pos)
 
 
+class ScrollButtons:
+    """Pinned up/down scroll controls for touch lists (no mouse wheel on a phone).
+
+    Lives in a right-edge gutter of `viewport`; the owning screen keeps the scroll
+    offset and narrows its list content by `gutter()` so rows do not sit under the
+    buttons. The buttons draw as triangles and dim at the scroll bounds.
+    """
+
+    def __init__(self, viewport: pygame.Rect) -> None:
+        size = LAYOUT.i("ui_scroll_btn", 44)
+        x = viewport.right - size
+        self.up = pygame.Rect(x, viewport.top, size, size)
+        self.down = pygame.Rect(x, viewport.bottom - size, size, size)
+        self.step = LAYOUT.i("ui_scroll_step", 90)
+
+    @staticmethod
+    def gutter() -> int:
+        return LAYOUT.i("ui_scroll_gutter", 52)
+
+    def contains(self, pos: tuple[int, int]) -> bool:
+        return self.up.collidepoint(pos) or self.down.collidepoint(pos)
+
+    def handle(self, event: pygame.event.Event, scroll: int, max_scroll: int) -> int:
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.up.collidepoint(event.pos):
+                return max(0, scroll - self.step)
+            if self.down.collidepoint(event.pos):
+                return min(max_scroll, scroll + self.step)
+        return scroll
+
+    def draw(self, surface: pygame.Surface, scroll: int, max_scroll: int) -> None:
+        self._arrow(surface, self.up, True, scroll > 0)
+        self._arrow(surface, self.down, False, scroll < max_scroll)
+
+    def _arrow(self, surface: pygame.Surface, rect: pygame.Rect,
+               up: bool, enabled: bool) -> None:
+        radius = LAYOUT.i("ui_btn_radius", 12)
+        pygame.draw.rect(surface, _C["surface"], rect, border_radius=radius)
+        pygame.draw.rect(surface, _C["border"], rect, width=2, border_radius=radius)
+        col = _C["accent"] if enabled else _C["text_dim"]
+        cx, cy = rect.center
+        d = rect.width // 5
+        if up:
+            pts = [(cx, cy - d), (cx - d, cy + d), (cx + d, cy + d)]
+        else:
+            pts = [(cx, cy + d), (cx - d, cy - d), (cx + d, cy - d)]
+        pygame.draw.polygon(surface, col, pts)
+
+
 class MeterBar:
     def __init__(self, rect: pygame.Rect, color: list[int]) -> None:
         self.rect = rect
