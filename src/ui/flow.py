@@ -1,13 +1,14 @@
 # src/ui/flow.py
 """Full single-device flow controller.
 
-Splash -> Room -> Draft -> Play loop [Predict -> Cinematic] -> Final.
-Builds the draft pool from a feed's recorded lineups. SIM mode (hotkeys + help popup)
-is threaded into every screen. The engine is untouched; meter before/after values are
-captured around resolve_window to drive the cinematic.
+Splash -> Room -> Pre-game -> Draft -> Play loop [Predict -> Cinematic] -> Half Time.
+The half is `regular_windows` five-minute windows (minutes 0-45) plus one Extra-Time
+window that resolves over all first-half stoppage, discovered by polling the feed for
+a half-time status. The engine is untouched; meter before/after values are captured
+around resolve_window to drive the cinematic.
 """
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from src.game.mock_feed import MockFeed
 from src.game.replay_feed import ReplayFeed
 from src.game.athlete import DraftedAthlete
@@ -16,15 +17,17 @@ from src.game.roster import Roster
 from src.game.session import GameSession
 from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
+from src.game.half_clock import HalfClock
 from src.game.window_report import WindowReport, build_window_report
 from src.ui.sim import SimMode
 from src.ui.screens.splash import SplashScreen
 from src.ui.screens.room import RoomScreen
+from src.ui.screens.pregame_screen import PregameScreen
 from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen
-from src.utils.constants import CONFIG, LAYOUT, load_data
+from src.utils.constants import CONFIG, load_data
 
 if TYPE_CHECKING:
     from src.ui.app import App
@@ -34,6 +37,11 @@ _STAT_LABELS = {s["code"]: s["label"] for s in _STATS_MENU["stats"]}
 _THRESH = CONFIG["meter"]["success_threshold"]
 _THRESH_C = CONFIG["meter"]["concede_threshold"]
 _WINDOW_MIN = CONFIG["game"]["window_seconds"] // 60
+_HALF_MIN = CONFIG["game"]["half_minutes"]
+_HALF_LABEL = CONFIG["game"]["half_label"]
+_HALFTIME_LABEL = CONFIG["game"]["halftime_label"]
+_ET_LABEL = CONFIG["game"]["extra_time_label"]
+_HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
 
 
@@ -48,13 +56,22 @@ def _demo_pool() -> list[DraftedAthlete]:
 
 
 def _demo_script() -> dict:
+    """A full first half: cumulative stats every 5 minutes 0-45, plus 3 minutes of
+    stoppage (45 -> 48), with a halftime status at minute 48."""
     return {
-        "status_by_minute": [(0, "live"), (15, "finished")],
+        "status_by_minute": [(0, "live"), (48, "halftime")],
         "snapshots": [
-            {"minute": 0,  "stats": {"corner_kicks": 0, "shots_on_goal": 0, "goalkeeper_saves": 0, "goals": 0, "cards": 0}},
-            {"minute": 5,  "stats": {"corner_kicks": 3, "shots_on_goal": 2, "goalkeeper_saves": 2, "goals": 0, "cards": 1}},
-            {"minute": 10, "stats": {"corner_kicks": 6, "shots_on_goal": 5, "goalkeeper_saves": 3, "goals": 1, "cards": 1}},
-            {"minute": 15, "stats": {"corner_kicks": 8, "shots_on_goal": 7, "goalkeeper_saves": 5, "goals": 2, "cards": 2}},
+            {"minute": 0,  "stats": {"corner_kicks": 0,  "shots_on_goal": 0, "goalkeeper_saves": 0, "goals": 0, "cards": 0}},
+            {"minute": 5,  "stats": {"corner_kicks": 1,  "shots_on_goal": 1, "goalkeeper_saves": 0, "goals": 0, "cards": 0}},
+            {"minute": 10, "stats": {"corner_kicks": 2,  "shots_on_goal": 2, "goalkeeper_saves": 1, "goals": 0, "cards": 0}},
+            {"minute": 15, "stats": {"corner_kicks": 3,  "shots_on_goal": 3, "goalkeeper_saves": 1, "goals": 0, "cards": 1}},
+            {"minute": 20, "stats": {"corner_kicks": 4,  "shots_on_goal": 4, "goalkeeper_saves": 2, "goals": 1, "cards": 1}},
+            {"minute": 25, "stats": {"corner_kicks": 5,  "shots_on_goal": 5, "goalkeeper_saves": 2, "goals": 1, "cards": 1}},
+            {"minute": 30, "stats": {"corner_kicks": 6,  "shots_on_goal": 6, "goalkeeper_saves": 3, "goals": 1, "cards": 1}},
+            {"minute": 35, "stats": {"corner_kicks": 7,  "shots_on_goal": 7, "goalkeeper_saves": 3, "goals": 1, "cards": 2}},
+            {"minute": 40, "stats": {"corner_kicks": 8,  "shots_on_goal": 8, "goalkeeper_saves": 4, "goals": 2, "cards": 2}},
+            {"minute": 45, "stats": {"corner_kicks": 9,  "shots_on_goal": 9, "goalkeeper_saves": 4, "goals": 2, "cards": 2}},
+            {"minute": 48, "stats": {"corner_kicks": 10, "shots_on_goal": 9, "goalkeeper_saves": 5, "goals": 2, "cards": 2}},
         ],
     }
 
@@ -66,7 +83,7 @@ def _pool_from_feed(feed: MockFeed) -> list[DraftedAthlete]:
 
 
 class Flow:
-    """Owns the screen sequence and shared state for one single-device match."""
+    """Owns the screen sequence and shared state for one single-device half."""
 
     def __init__(self, app: "App", feed: MockFeed, pool: list[DraftedAthlete],
                  sim: SimMode) -> None:
@@ -74,10 +91,10 @@ class Flow:
         self.feed = feed
         self.pool = pool
         self.sim = sim
-        self.last_report: WindowReport | None = None
-        self.session: GameSession | None = None
+        self.clock = HalfClock(_HALF_MIN, _WINDOW_MIN)
+        self.last_report: Optional[WindowReport] = None
+        self.session: Optional[GameSession] = None
         self.score_codes: list[str] = []
-        self.minute = 0
         self.window = 1
         self.app.global_handler = self.sim.handle_global
         self.app.overlay = self.sim.draw_overlay
@@ -90,6 +107,10 @@ class Flow:
         self.app.set_screen(RoomScreen(self.app, self._after_room, self.sim))
 
     def _after_room(self, code: str) -> None:
+        self.app.set_screen(PregameScreen(self.app, self._fixture(),
+                                           self._after_pregame, self.sim))
+
+    def _after_pregame(self) -> None:
         self.app.set_screen(DraftScreen(self.app, self.pool, self._after_draft,
                                         self.sim, title="Draft your six"))
 
@@ -99,19 +120,48 @@ class Flow:
                                    rng=random.Random(_RNG_SEED))
         self._play_window()
 
+    def _fixture(self) -> dict:
+        meta = getattr(self.feed, "meta", {})
+        return {
+            "home": meta.get("home_team", "Canada"),
+            "away": meta.get("away_team", "Opponent"),
+            "competition": meta.get("competition", "Friendly"),
+            "label": _HALF_LABEL,
+        }
+
     def _play_window(self) -> None:
         available = self.session.roster.available()
+        phase = _ET_LABEL if self.clock.is_extra_time(self.window) else None
         self.app.set_screen(PlayScreen(self.app, available, self._after_predict,
-                                       self.window, self.sim, self.last_report))
+                                       self.window, self.sim, self.last_report,
+                                       phase_label=phase))
+
+    def _poll_half_end(self, start: int) -> int:
+        """Emulate live polling: step forward from `start`, asking the feed its status
+        each minute, and stop at the first minute the half is reported over (bounded by
+        the feed's last known minute so a feed that never reports halftime terminates)."""
+        last = self.feed.last_known_minute()
+        m = start
+        while m < last and not HalfClock.is_half_over(
+                self.feed.match_status_at(m), _HALFTIME_STATUS):
+            m += 1
+        return m
+
+    def _window_actuals(self) -> dict[str, int]:
+        start = self.clock.window_start(self.window)
+        if self.clock.is_extra_time(self.window):
+            end = self._poll_half_end(start)
+        else:
+            end = self.clock.window_end(self.window)
+        a = self.feed.snapshot_at(start)
+        b = self.feed.snapshot_at(end)
+        from src.game.normalize_soccer import actuals_from_raw
+        raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
+        return actuals_from_raw(raw, _STATS_MENU)
 
     def _after_predict(self, preds: list[Prediction], active_id: str,
                        use_power: bool) -> None:
-        end_min = self.minute + _WINDOW_MIN
-        a = self.feed.snapshot_at(self.minute)
-        b = self.feed.snapshot_at(end_min)
-        from src.game.normalize_soccer import actuals_from_raw
-        raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
-        actuals = actuals_from_raw(raw, _STATS_MENU)
+        actuals = self._window_actuals()
 
         s_before = self.session.success_meter.value
         c_before = self.session.concede_meter.value
@@ -136,15 +186,15 @@ class Flow:
             concede_before=c_before, concede_after=c_after, concede_fired=res.concede_fired,
             threshold=_THRESH, score_events=res.score_events, stat_labels=_STAT_LABELS)
 
-        self.minute = end_min
         self.app.set_screen(CinematicScreen(self.app, script, self._after_cinematic, self.sim))
 
     def _after_cinematic(self) -> None:
         team, opp = aggregate(self.score_codes)
-        self.window += 1
-        if self.feed.match_status_at(self.minute) == "finished":
-            self.app.set_screen(FinalScreen(self.app, team, opp, None))
+        if self.clock.is_extra_time(self.window):
+            self.app.set_screen(FinalScreen(self.app, team, opp, None,
+                                            title=_HALFTIME_LABEL))
         else:
+            self.window += 1
             self._play_window()
 
 
