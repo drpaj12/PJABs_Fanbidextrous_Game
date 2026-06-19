@@ -15,9 +15,9 @@ from src.game.prediction import Prediction
 from src.game.roster import Roster
 from src.game.session import GameSession
 from src.game.scoring import aggregate
-from src.game.cinematic import CinematicScript, build_cinematic_script
+from src.game.cinematic import build_cinematic_script
+from src.game.window_report import WindowReport, build_window_report
 from src.ui.sim import SimMode
-from src.ui.widgets import LogList
 from src.ui.screens.splash import SplashScreen
 from src.ui.screens.room import RoomScreen
 from src.ui.screens.draft_screen import DraftScreen
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 _STATS_MENU = load_data(CONFIG["assets"]["stats_menu_file"])
 _STAT_LABELS = {s["code"]: s["label"] for s in _STATS_MENU["stats"]}
 _THRESH = CONFIG["meter"]["success_threshold"]
+_THRESH_C = CONFIG["meter"]["concede_threshold"]
 _WINDOW_MIN = CONFIG["game"]["window_seconds"] // 60
 _RNG_SEED = CONFIG["game"]["rng_seed"]
 
@@ -73,21 +74,13 @@ class Flow:
         self.feed = feed
         self.pool = pool
         self.sim = sim
-        self.log = self._new_log()
+        self.last_report: WindowReport | None = None
         self.session: GameSession | None = None
         self.score_codes: list[str] = []
         self.minute = 0
         self.window = 1
-        self._pending_script: CinematicScript | None = None
         self.app.global_handler = self.sim.handle_global
         self.app.overlay = self.sim.draw_overlay
-
-    def _new_log(self) -> "LogList":
-        import pygame
-        sw = self.app.screen.get_width()
-        m = LAYOUT.i("screen_margin", 20)
-        return LogList(pygame.Rect(m, LAYOUT.i("play_log_top", 100),
-                                   sw - 2 * m, LAYOUT.i("play_log_h", 360)))
 
     # -- flow steps --
     def start(self) -> None:
@@ -109,7 +102,7 @@ class Flow:
     def _play_window(self) -> None:
         available = self.session.roster.available()
         self.app.set_screen(PlayScreen(self.app, available, self._after_predict,
-                                       self.log, self.window, self.sim))
+                                       self.window, self.sim, self.last_report))
 
     def _after_predict(self, preds: list[Prediction], active_id: str,
                        use_power: bool) -> None:
@@ -130,6 +123,13 @@ class Flow:
         for ev in res.score_events:
             self.score_codes.append(ev.to_code())
 
+        self.last_report = build_window_report(
+            window=self.window, predictions=preds, actuals=actuals,
+            stat_labels=_STAT_LABELS, success_value=s_after, concede_value=c_after,
+            success_threshold=_THRESH, concede_threshold=_THRESH_C,
+            success_fired=res.success_fired, concede_fired=res.concede_fired,
+            success_shot=res.success_shot, concede_shot=res.concede_shot)
+
         script = build_cinematic_script(
             predictions=preds, actuals=actuals,
             success_before=s_before, success_after=s_after, success_fired=res.success_fired,
@@ -138,15 +138,9 @@ class Flow:
 
         self.minute = end_min
         self.app.set_screen(CinematicScreen(self.app, script, self._after_cinematic, self.sim))
-        self._pending_script = script
 
     def _after_cinematic(self) -> None:
         team, opp = aggregate(self.score_codes)
-        s = self._pending_script
-        self.log.add(f"W{self.window}: +{s.team_delta} for / +{s.opp_delta} against "
-                     f"(you {team}-{opp} opp)")
-        if s.team_delta > 0:
-            self.log.add(f"GOAL window {self.window}!")
         self.window += 1
         if self.feed.match_status_at(self.minute) == "finished":
             self.app.set_screen(FinalScreen(self.app, team, opp, None))

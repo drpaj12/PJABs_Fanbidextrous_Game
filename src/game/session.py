@@ -2,14 +2,27 @@
 """Per-player session state: resolves one window's predictions into meter/score changes."""
 import random
 from dataclasses import dataclass, field
+from typing import Optional
 from src.game.athlete import DraftedAthlete
 from src.game.roster import Roster
 from src.game.prediction import Prediction, grade
 from src.game.meters import Meter
-from src.game.powers import this_window_effect, next_window_effect
+from src.game.powers import this_window_effect, next_window_effect, conversion_for
 from src.game.shot import resolve_shot, pick_concede_attacker
 from src.game.scoring import ScoreEvent
 from src.utils.constants import CONFIG
+
+
+@dataclass(frozen=True)
+class ShotOutcome:
+    """The single shot a meter earns when it fires: who took it and whether it scored.
+
+    Local detail for the results panel only -- not transmitted (each client re-derives it).
+    """
+    shooter_name: str
+    archetype: str
+    conversion: float  # 0..1 chance the shot converted
+    scored: bool
 
 
 @dataclass
@@ -17,6 +30,8 @@ class WindowResolution:
     success_fired: bool
     concede_fired: bool
     score_events: list[ScoreEvent] = field(default_factory=list)
+    success_shot: Optional[ShotOutcome] = None
+    concede_shot: Optional[ShotOutcome] = None
 
 
 class GameSession:
@@ -74,18 +89,26 @@ class GameSession:
         concede = max(0, concede)
 
         events: list[ScoreEvent] = []
+        success_shot: Optional[ShotOutcome] = None
         success_fired = self.success_meter.add(success)
         if success_fired:
             scored = resolve_shot(active, self.rng, bonus=conversion_bonus)
             events.append(ScoreEvent(self.slot, window, "for", scored))
+            success_shot = ShotOutcome(active.name, active.archetype,
+                                       conversion_for(active) + conversion_bonus, scored)
 
+        concede_shot: Optional[ShotOutcome] = None
         concede_fired = self.concede_meter.add(concede)
         if concede_fired:
             if negate_concede:
                 events.append(ScoreEvent(self.slot, window, "against", False))
+                concede_shot = ShotOutcome("Opponent", "", 0.0, False)
             else:
                 attacker = pick_concede_attacker(self.pool, self._owned_ids, self.rng)
                 scored = resolve_shot(attacker, self.rng)
                 events.append(ScoreEvent(self.slot, window, "against", scored))
+                concede_shot = ShotOutcome(attacker.name, attacker.archetype,
+                                           conversion_for(attacker), scored)
 
-        return WindowResolution(success_fired, concede_fired, events)
+        return WindowResolution(success_fired, concede_fired, events,
+                                success_shot, concede_shot)

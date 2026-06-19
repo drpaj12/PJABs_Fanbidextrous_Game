@@ -15,13 +15,14 @@
     "accent":     [0, 245, 228],
     "white":      [238, 240, 245],
     "red":        [192, 57, 43],
+    "orange":     [230, 126, 34],
     "green":      [39, 174, 96],
     "gold":       [184, 150, 10]
   },
   "game": {
     "roster_size": 6,
     "window_seconds": 300,
-    "max_predictions_per_window": 2,
+    "max_predictions_per_window": 5,
     "rng_seed": 99
   },
   "scoring": {
