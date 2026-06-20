@@ -1,18 +1,21 @@
 <?php
-// feed_cache.php -- server-side proxy + cache of API-Football, served to both clients.
+// feed_cache.php -- server-side proxy + cache of API-Football, served to every client.
 //
-// Free tier is 100 requests/day, so this is written to be frugal:
-//   * cache is PER FIXTURE (feed_cache_<id>.json) so several matches in a day do not
-//     clobber each other,
-//   * lineups are fetched ONCE per fixture and reused (they do not change after the XI
-//     is published), so each refresh costs 2 upstream calls (statistics + fixture),
-//   * a 180s TTL means ~15 refreshes over a 45-min half -> ~31 calls/game, ~93 for the
-//     three World Cup games on a match day.
+// Quota design (free tier = 100 requests/day):
+//   * cache is PER FIXTURE (feed_cache_<id>.json),
+//   * ONLY the lead client (?lead=1) is allowed to spend upstream calls; every other
+//     client reads whatever is cached and never touches API-Football. This bounds the
+//     day's usage to a SINGLE client's poll rate no matter how many people join,
+//   * lineups are fetched ONCE per fixture and reused (the XI does not change), so each
+//     lead refresh costs 2 upstream calls (statistics + fixture),
+//   * a 300s TTL means one refresh per 5-minute poll -> ~10 refreshes over a 45-min
+//     half -> ~21 calls/game, ~63 for the three World Cup games on a match day.
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-$CACHE_TTL = 180; // seconds; > the 120s client poll so cache hits dominate the quota
+$CACHE_TTL = 300; // seconds; matches the client's 5-minute poll cadence
 $fixture = preg_replace('/[^0-9]/', '', $_GET['fixture'] ?? '');
+$isLead  = (($_GET['lead'] ?? '') === '1'); // only the lead client spends quota
 $keyFile = __DIR__ . '/apifootball_key.txt'; // one line, NOT web-readable
 
 if ($fixture === '') {
@@ -24,10 +27,30 @@ if ($fixture === '') {
 $cacheFile   = __DIR__ . "/feed_cache_$fixture.json";
 $lineupsFile = __DIR__ . "/lineups_$fixture.json";
 
+// Fresh cache: serve it to everyone, no upstream cost.
 if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < $CACHE_TTL)) {
     echo file_get_contents($cacheFile);
     exit;
 }
+
+// Cache is stale or missing. Followers must NOT spend quota: hand back the last
+// snapshot we have (stale but usable), or a "waiting for the lead client" marker.
+if (!$isLead) {
+    if (file_exists($cacheFile)) {
+        echo file_get_contents($cacheFile);
+    } else {
+        echo json_encode([
+            "lineups"          => null,
+            "statistics"       => null,
+            "fixture"          => null,
+            "cached_at"        => 0,
+            "waiting_for_lead" => true,
+        ]);
+    }
+    exit;
+}
+
+// --- Lead client only past this point: this is where upstream calls happen. ---
 if (!file_exists($keyFile)) {
     http_response_code(503);
     echo '{"error":"feed unavailable"}';

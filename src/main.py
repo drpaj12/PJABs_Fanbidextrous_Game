@@ -6,6 +6,7 @@
   .venv/Scripts/python src/main.py --sim <slug>         # recorded match + SIM hotkeys
   .venv/Scripts/python src/main.py --live [fixture_id]  # LIVE match off the relay
   .venv/Scripts/python src/main.py --launcher           # web-style menu: live vs test game
+  .venv/Scripts/python src/main.py --app                # full web entry: username -> menu
 """
 import asyncio
 import sys
@@ -21,8 +22,13 @@ from src.ui import flow
 
 async def main() -> None:
     app = App()
-    if "--launcher" in sys.argv:
-        flow.start_launcher(app, sim_mode="--simlive" in sys.argv)
+    # Desktop dev runs the live paths AS the lead client so it polls standalone; the
+    # web build asks for a username (--app) to decide lead vs follower at run time.
+    sim_live = "--simlive" in sys.argv
+    if "--app" in sys.argv:
+        flow.start_app(app, sim_mode=sim_live)
+    elif "--launcher" in sys.argv:
+        flow.start_launcher(app, sim_mode=sim_live, is_lead=True)
     elif "--sim" in sys.argv:
         slug = sys.argv[sys.argv.index("--sim") + 1]
         flow.start_simulation(app, f"assets/data/simulations/{slug}.json", sim_mode=True)
@@ -31,10 +37,10 @@ async def main() -> None:
         arg = sys.argv[i + 1] if i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit() \
             else None
         if arg is not None:
-            flow.start_live(app, int(arg), sim_mode="--simlive" in sys.argv)
+            flow.start_live(app, int(arg), sim_mode=sim_live, is_lead=True)
         else:
             # No id given -> show the match picker (config live.fixtures).
-            flow.start_live_select(app, sim_mode="--simlive" in sys.argv)
+            flow.start_live_select(app, sim_mode=sim_live, is_lead=True)
     elif "--simdemo" in sys.argv:
         flow.start(app, sim_mode=True)
     else:

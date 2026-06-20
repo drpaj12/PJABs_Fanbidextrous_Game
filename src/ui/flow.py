@@ -33,6 +33,7 @@ from src.ui.screens.status_screens import FinalScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
 from src.ui.screens.launcher_screen import LauncherScreen
+from src.ui.screens.username_screen import UsernameScreen
 from src.utils.constants import CONFIG, load_data
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ _RNG_SEED = CONFIG["game"]["rng_seed"]
 _PREGAME = CONFIG["pregame"]
 _LIVE = CONFIG["live"]
 _LAUNCHER = CONFIG["launcher"]
+_LEAD_NAME = CONFIG["client"]["lead_username"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -274,12 +276,14 @@ class LiveFlow(Flow):
             self._play_window()
 
 
-def start_live(app: "App", fixture_id: int, sim_mode: bool = False) -> None:
+def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
+               is_lead: bool = False) -> None:
     """Live single-player half. Park on a waiting screen until the API publishes the
-    starting XI, then size the half from the live match clock and run the draft + windows."""
+    starting XI, then size the half from the live match clock and run the draft + windows.
+    Only the lead client (is_lead) spends API-Football quota; followers read the cache."""
     feed = LiveFeed()
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
-                             feed_path=CONFIG["relay"]["feed_path"])
+                             feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead)
     sim = SimMode(sim_mode)
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
@@ -300,7 +304,8 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False) -> None:
                                   wait_for_lineups=True))
 
 
-def start_live_select(app: "App", sim_mode: bool = False) -> None:
+def start_live_select(app: "App", sim_mode: bool = False,
+                      is_lead: bool = False) -> None:
     """Show the live-match picker (config live.fixtures), then play the chosen one live.
     This is the web/no-argument entry point for match day."""
     sim = SimMode(sim_mode)
@@ -309,16 +314,27 @@ def start_live_select(app: "App", sim_mode: bool = False) -> None:
     fixtures = _LIVE.get("fixtures") or []
 
     def picked(fixture_id: int) -> None:
-        start_live(app, fixture_id, sim_mode=sim_mode)
+        start_live(app, fixture_id, sim_mode=sim_mode, is_lead=is_lead)
 
     app.set_screen(FixtureSelectScreen(app, fixtures, picked, sim))
 
 
-def start_launcher(app: "App", sim_mode: bool = False) -> None:
+def start_app(app: "App", sim_mode: bool = False) -> None:
+    """Top web entry: ask for a username, then show the mode menu. A username matching
+    config.client.lead_username (case-insensitive) becomes the lead client that polls
+    the live scores; everyone else free-rides on the website cache."""
+    def submitted(username: str) -> None:
+        is_lead = username.strip().lower() == _LEAD_NAME.lower()
+        start_launcher(app, sim_mode=sim_mode, is_lead=is_lead)
+
+    app.set_screen(UsernameScreen(app, submitted))
+
+
+def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False) -> None:
     """Web entry: choose 'Live match' (real fixtures + relay) or 'Test game' (an offline
     recorded match, no API/no waiting) so the full flow can be tried without a live game."""
     def go_live() -> None:
-        start_live_select(app, sim_mode=sim_mode)
+        start_live_select(app, sim_mode=sim_mode, is_lead=is_lead)
 
     def go_sim() -> None:
         start_simulation(app, _LAUNCHER["test_sim"], sim_mode=True)

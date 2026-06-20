@@ -48,8 +48,13 @@
     "max_stars": 5
   },
   "feed": {
-    "poll_seconds": 120,
+    "_comment": "poll_seconds 300 = one 5-minute poll per window. Only the lead client triggers upstream fetches (see relay cache_ttl + client.lead_username), so a full half is ~10 refreshes x 2 calls + 1 lineups = ~21 queries/game; 3 games < 80/day.",
+    "poll_seconds": 300,
     "halftime_status": "halftime"
+  },
+  "client": {
+    "_comment": "The lead client (username match is case-insensitive) is the ONLY client that triggers upstream API-Football fetches; all other clients read the shared website cache. This bounds the day's quota to one client's poll rate no matter how many people join.",
+    "lead_username": "drpaj"
   },
   "pregame": {
     "start_button_label": "Start First Half",
