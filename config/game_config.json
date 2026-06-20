@@ -75,9 +75,9 @@
     "warn_minutes_before": 60,
     "start_minutes_before": 15,
     "fixtures": [
-      {"id": 1539007, "label": "Netherlands v Sweden"},
-      {"id": 1489393, "label": "Germany v Ivory Coast"},
-      {"id": 1539006, "label": "Turkiye v Paraguay"}
+      {"id": 1539007, "label": "Netherlands v Sweden", "kickoff": "2026-06-20T17:00:00+00:00"},
+      {"id": 1489393, "label": "Germany v Ivory Coast", "kickoff": "2026-06-20T20:00:00+00:00"},
+      {"id": 1539006, "label": "Turkiye v Paraguay", "kickoff": "2026-06-20T03:00:00+00:00"}
     ]
   },
   "launcher": {

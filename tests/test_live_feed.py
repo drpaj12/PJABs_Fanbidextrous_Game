@@ -97,3 +97,19 @@ def test_kickoff_iso_and_status_short_from_fixture():
 
 def test_kickoff_iso_none_until_seen():
     assert LiveFeed().kickoff_iso() is None
+
+
+def test_kickoff_iso_can_be_seeded_before_any_poll():
+    feed = LiveFeed()
+    assert feed.kickoff_iso() is None
+    feed.seed_kickoff("2026-06-20T17:00:00+00:00")
+    assert feed.kickoff_iso() == "2026-06-20T17:00:00+00:00"
+
+
+def test_a_real_poll_overrides_a_seeded_kickoff():
+    feed = LiveFeed()
+    feed.seed_kickoff("2026-06-20T17:00:00+00:00")
+    snap = _snap("NS", 0, 0, 0, 0, 0, 0, lineups=False)
+    snap["fixture"]["response"][0]["fixture"]["date"] = "2026-06-20T17:05:00+00:00"
+    feed.record(snap)
+    assert feed.kickoff_iso() == "2026-06-20T17:05:00+00:00"

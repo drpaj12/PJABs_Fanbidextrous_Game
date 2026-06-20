@@ -282,6 +282,10 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
     starting XI, then size the half from the live match clock and run the draft + windows.
     Only the lead client (is_lead) spends API-Football quota; followers read the cache."""
     feed = LiveFeed()
+    for fx in (_LIVE.get("fixtures") or []):
+        if fx.get("id") == fixture_id and fx.get("kickoff"):
+            feed.seed_kickoff(fx["kickoff"])
+            break
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
                              feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead)
     sim = SimMode(sim_mode)

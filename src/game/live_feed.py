@@ -116,6 +116,12 @@ class LiveFeed:
         a poll has returned one. Drives the pre-game countdown."""
         return self._kickoff_iso
 
+    def seed_kickoff(self, kickoff_iso: str) -> None:
+        """Set the scheduled kickoff from a non-API source (config) so the countdown shows
+        with zero API calls. A real poll's fixture.date overrides this (see record())."""
+        if kickoff_iso:
+            self._kickoff_iso = kickoff_iso
+
     def status_short(self) -> str:
         """Raw API-Football status code (NS, 1H, HT, FT, ...) before engine mapping."""
         return self._status_short
