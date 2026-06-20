@@ -64,3 +64,10 @@ def test_windows_entered_handles_a_focus_loss_skip():
 def test_windows_entered_empty_when_no_boundary():
     m = mc()
     assert m.windows_entered(K + 60, K + 90) == []
+
+
+def test_windows_entered_crossing_into_extra_time():
+    # the game-meaningful 9 -> 10 step: leaving the last regular window (40-45')
+    # and entering the Extra-Time window at 45'.
+    m = mc()
+    assert m.windows_entered(K + 44 * 60, K + 45 * 60) == [10]
