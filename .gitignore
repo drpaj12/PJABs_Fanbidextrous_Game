@@ -43,3 +43,6 @@ DEBUG_OUTPUTS/
 
 # Local save files / runtime preferences written by the game
 .*_prefs.json
+
+# Build id stamp -- written into the bundled config by the web build, not source
+config/build_id.txt

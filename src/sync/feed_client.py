@@ -22,6 +22,12 @@ class FeedClient:
         """True if this client triggers upstream fetches (the others read the cache)."""
         return self._is_lead
 
+    @property
+    def transport_name(self) -> str:
+        """Class name of the active transport (FetchTransport in WASM, UrllibTransport on
+        desktop). Surfaced on screen for diagnosing which network path a client took."""
+        return type(self._t).__name__
+
     async def get_feed(self, fixture_id: int) -> dict[str, Any]:
         url = f"{self._base}{self._path}?fixture={fixture_id}"
         if self._is_lead:
