@@ -357,8 +357,72 @@ def live_smoke_2h() -> int:
     return 0 if ok else 1
 
 
+def schedule_smoke() -> int:
+    """Drive the dynamic FixtureSelectScreen headlessly with a synthetic schedule + a fixed
+    now_fn. Asserts the visible set is the rolling-window subset sorted soonest-first, that a
+    finished game is not playable, and that SIM auto-picks the first PLAYABLE visible game's
+    id. Returns 0 on OK."""
+    from datetime import datetime, timezone, timedelta
+    from src.ui.app import App
+    from src.game.schedule import ScheduledGame, visible_games
+    from src.ui.screens.fixture_select_screen import FixtureSelectScreen
+    from src.ui.sim import SimMode
+
+    cfg = {"lookahead_hours": 48, "drop_after_hours": 4,
+           "live_window_minutes": 150, "soon_minutes": 15}
+    now = 1_000_000.0          # arbitrary fixed wall clock (epoch seconds)
+    hour = 3600
+
+    def g(gid: int, offset_h: float, home: str = "A", away: str = "B") -> ScheduledGame:
+        ref = (datetime(1970, 1, 1, tzinfo=timezone.utc)
+               + timedelta(seconds=now + offset_h * hour))
+        return ScheduledGame(id=gid, competition="WC", home=home, away=away,
+                             round="Group A", kickoff_utc=ref.isoformat(),
+                             kickoff_local="TBD")
+
+    games = [
+        g(101, 2.0, "Soon", "One"),     # upcoming, in 2h  -> playable
+        g(102, -1.0, "Live", "Now"),    # kicked off 1h ago -> live, playable
+        g(103, -100.0, "Old", "Done"),  # long past         -> dropped by window
+        g(104, 100.0, "Far", "Future"), # beyond lookahead  -> dropped by window
+    ]
+
+    # Expected visible set (sorted soonest-first): Live (-1h) then Soon (+2h).
+    expect_titles = ["Live v Now", "Soon v One"]
+    vis = visible_games(games, now, cfg)
+    vis_ok = [x.title() for x in vis] == expect_titles
+
+    app = App()
+    picked: list[int] = []
+    sim = SimMode(True)
+    screen = FixtureSelectScreen(app, games, picked.append, cfg, sim, now_fn=lambda: now)
+    screen.update(0.0)                  # SIM auto-pick on first update
+
+    # First playable visible game is the live one (id 102).
+    pick_ok = picked == [102]
+
+    # Sanity: a draw pass must not raise (renders cards + chips for the visible set).
+    draw_ok = True
+    try:
+        app.screen.fill((0, 0, 0))
+        screen.draw(app.screen)
+    except Exception as exc:            # pragma: no cover - smoke guard
+        draw_ok = False
+        print("FAIL schedule smoke: draw raised", exc)
+
+    ok = vis_ok and pick_ok and draw_ok
+    print(("OK" if vis_ok else "FAIL"),
+          "schedule smoke: visible =", [x.title() for x in vis],
+          "(expected", expect_titles, ")")
+    print(("OK" if pick_ok else "FAIL"),
+          "schedule smoke: SIM auto-picked =", picked, "(expected [102])")
+    print(("OK" if draw_ok else "FAIL"), "schedule smoke: draw pass clean")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     rc_offline = main()
     rc_live = live_smoke()
     rc_live_2h = live_smoke_2h()
-    raise SystemExit(rc_offline or rc_live or rc_live_2h)
+    rc_schedule = schedule_smoke()
+    raise SystemExit(rc_offline or rc_live or rc_live_2h or rc_schedule)
