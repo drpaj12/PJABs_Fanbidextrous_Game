@@ -127,5 +127,16 @@
   "popup_w": 340,
   "popup_pad": 18,
   "popup_title_size": 24,
-  "popup_line_size": 18
+  "popup_line_size": 18,
+
+  "fixsel_title_size": 30,
+  "fixsel_title_y": 150,
+  "fixsel_list_top": 210,
+  "fixsel_list_bottom_pad": 60,
+  "fixsel_card_h": 76,
+  "fixsel_card_gap": 10,
+  "fixsel_card_title_size": 22,
+  "fixsel_card_sub_size": 17,
+  "fixsel_chip_size": 18,
+  "fixsel_card_title_max": 26
 }

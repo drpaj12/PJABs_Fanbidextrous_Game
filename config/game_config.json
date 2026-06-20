@@ -71,7 +71,7 @@
     "feed_path": "/feed_cache.php"
   },
   "live": {
-    "_comment": "fixture_id is the single-game default for --live; fixtures is the pick list (World Cup 2026-06-20). Free tier = 100 req/day; relay caches per fixture, fetches lineups once. warn_minutes_before: show a 'too early, come back later' notice when kickoff is further off than this. start_minutes_before: the lead does not poll the API until kickoff is within this many minutes (saves quota); a kickoff countdown shows meanwhile.",
+    "_comment": "fixture_id is the single-game default for --live; fixtures seeds the live feed kickoff for the curated set. The PICKER now reads assets/data/schedule.json (live.schedule) instead of fixtures. Free tier = 100 req/day; relay caches per fixture, fetches lineups once. warn_minutes_before: show a 'too early, come back later' notice when kickoff is further off than this. start_minutes_before: the lead does not poll the API until kickoff is within this many minutes (saves quota); a kickoff countdown shows meanwhile.",
     "fixture_id": 1539007,
     "competition_label": "FIFA World Cup 2026",
     "warn_minutes_before": 60,
@@ -82,7 +82,15 @@
       {"id": 1539007, "label": "Netherlands v Sweden", "kickoff": "2026-06-20T17:00:00+00:00"},
       {"id": 1489393, "label": "Germany v Ivory Coast", "kickoff": "2026-06-20T20:00:00+00:00"},
       {"id": 1539006, "label": "Turkiye v Paraguay", "kickoff": "2026-06-20T03:00:00+00:00"}
-    ]
+    ],
+    "schedule": {
+      "_comment": "Picker source. file = assets/data basename. lookahead_hours/drop_after_hours bound the rolling window; live_window_minutes is the generous span a game is treated as live (2 halves + stoppage + HT) since the viewer does not poll the API; soon_minutes is the 'soon' threshold.",
+      "file": "schedule.json",
+      "lookahead_hours": 48,
+      "drop_after_hours": 4,
+      "live_window_minutes": 150,
+      "soon_minutes": 15
+    }
   },
   "launcher": {
     "_comment": "Web entry menu: Live match (real fixtures + relay) vs an offline simulated test game. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
