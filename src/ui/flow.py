@@ -9,11 +9,11 @@ around resolve_window to drive the cinematic.
 """
 import random
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 from src.game.mock_feed import MockFeed
 from src.game.replay_feed import ReplayFeed
 from src.game.live_feed import LiveFeed
-from src.game.live_schedule import LivePlan, live_plan
+from src.game.live_schedule import live_plan
 from src.game.athlete import DraftedAthlete
 from src.game.prediction import Prediction
 from src.game.roster import Roster
@@ -22,6 +22,7 @@ from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
 from src.game.half_clock import HalfClock
 from src.game.match_clock import MatchClock
+from src.game.half_picker import pick_half
 from src.game.kickoff import seconds_to_kickoff
 from src.game.window_report import WindowReport, build_window_report
 from src.game import feed_cache_policy as cachep
@@ -34,7 +35,7 @@ from src.ui.screens.pregame_screen import PregameScreen
 from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
-from src.ui.screens.status_screens import FinalScreen
+from src.ui.screens.status_screens import FinalScreen, RevealScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.ui.screens.live_play_screen import LivePlayScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
@@ -52,7 +53,9 @@ _THRESH_C = CONFIG["meter"]["concede_threshold"]
 _WINDOW_MIN = CONFIG["game"]["window_seconds"] // 60
 _HALF_MIN = CONFIG["game"]["half_minutes"]
 _HALF_LABEL = CONFIG["game"]["half_label"]
+_SECOND_HALF_LABEL = CONFIG["game"]["second_half_label"]
 _HALFTIME_LABEL = CONFIG["game"]["halftime_label"]
+_FULLTIME_LABEL = CONFIG["game"]["fulltime_label"]
 _ET_LABEL = CONFIG["game"]["extra_time_label"]
 _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
 _POLL_SECONDS = CONFIG["feed"]["poll_seconds"]
@@ -61,6 +64,8 @@ _PREGAME = CONFIG["pregame"]
 _LIVE = CONFIG["live"]
 _LAUNCHER = CONFIG["launcher"]
 _LEAD_NAME = CONFIG["client"]["lead_username"]
+_JOIN_CUTOFF = CONFIG["live"]["join_cutoff_minute"]
+_RESYNC_THRESHOLD = CONFIG["live"]["resync_threshold_seconds"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -224,12 +229,17 @@ class LiveFlow(Flow):
     differs (one always-running screen instead of the predict/wait/cinematic cycle)."""
 
     def __init__(self, app: "App", feed: LiveFeed, feed_client: FeedClient,
-                 fixture_id: int, pool: list[DraftedAthlete], plan: LivePlan,
-                 sim: SimMode, on_snapshot=None) -> None:
+                 fixture_id: int, pool: list[DraftedAthlete], half: int,
+                 clock: HalfClock, kickoff_epoch: float, sim: SimMode,
+                 to_picker: Callable[[], None], on_snapshot=None) -> None:
         super().__init__(app, feed, pool, sim)
         self.feed_client = feed_client
         self.fixture_id = fixture_id
-        self._scored = plan.scored_windows
+        self.half = half
+        self.clock = clock                       # half-aware (start_minute set by caller)
+        self.kickoff_epoch = kickoff_epoch
+        self.to_picker = to_picker
+        self.half_label = _SECOND_HALF_LABEL if half == 2 else _HALF_LABEL
         self.on_snapshot = on_snapshot
 
     def _fixture(self) -> dict:
@@ -237,7 +247,7 @@ class LiveFlow(Flow):
             "home": self.feed.home_team() or _PREGAME["default_home_team"],
             "away": self.feed.away_team() or _PREGAME["default_away_team"],
             "competition": _LIVE["competition_label"],
-            "label": _HALF_LABEL,
+            "label": self.half_label,
         }
 
     def _after_draft(self, selected: list[str]) -> None:
@@ -247,9 +257,7 @@ class LiveFlow(Flow):
         self.session = GameSession(slot=0, roster=Roster(hand), pool=self.pool,
                                    rng=random.Random(_RNG_SEED))
         now_now = time.time()
-        secs = seconds_to_kickoff(self.feed.kickoff_iso(), now_now)
-        kickoff_epoch = now_now + secs if secs is not None else now_now
-        match_clock = MatchClock(kickoff_epoch, self.clock)
+        match_clock = MatchClock(self.kickoff_epoch, self.clock)
         editing_start = match_clock.editing_window(now_now)
         available = self.session.roster.available()
         self.app.set_screen(LivePlayScreen(
@@ -257,7 +265,9 @@ class LiveFlow(Flow):
             match_clock=match_clock, fixture_id=self.fixture_id,
             editing_window_start=editing_start, on_lock=self._on_lock,
             on_finished=self._to_final, poll_seconds=_POLL_SECONDS,
-            available=available, sim=self.sim, on_snapshot=self.on_snapshot))
+            available=available, half_label=self.half_label,
+            resync_threshold_seconds=_RESYNC_THRESHOLD,
+            sim=self.sim, on_snapshot=self.on_snapshot))
 
     def _window_actuals_for(self, window: int) -> dict[str, int]:
         """Actuals (per-stat deltas) for one window. A live Extra-Time window resolves over
@@ -294,8 +304,9 @@ class LiveFlow(Flow):
 
     def _to_final(self) -> None:
         team, opp = aggregate(self.score_codes)
+        title = _FULLTIME_LABEL if self.half == 2 else _HALFTIME_LABEL
         self.app.set_screen(FinalScreen(self.app, team, opp, None,
-                                        title=_HALFTIME_LABEL))
+                                        on_continue=self.to_picker, title=title))
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
@@ -328,16 +339,45 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
 
-    def begin() -> None:
-        clock = HalfClock(_HALF_MIN, _WINDOW_MIN)
-        plan = live_plan(feed.current_minute(), feed.match_status(), clock)
+    def to_picker() -> None:
+        start_live_select(app, sim_mode=sim_mode, is_lead=is_lead, username=username)
+
+    def no_half_left() -> None:
+        app.set_screen(RevealScreen(
+            app, ["This match has no half left to play.", "Pick another match."],
+            on_continue=to_picker))
+
+    def launch_half(half: int) -> None:
+        start_minute = 0 if half == 1 else _HALF_MIN
+        clock = HalfClock(_HALF_MIN, _WINDOW_MIN, start_minute=start_minute)
+        now_now = time.time()
+        if half == 1:
+            secs = seconds_to_kickoff(feed.kickoff_iso(), now_now)
+            kickoff_epoch = now_now + secs if secs is not None else now_now
+        else:
+            in_half = max(0, feed.current_minute() - _HALF_MIN)
+            kickoff_epoch = now_now - in_half * 60          # estimate; screen re-aligns
+        elapsed_in_half = max(0, feed.current_minute() - start_minute)
+        plan = live_plan(elapsed_in_half, feed.match_status(), clock)
         if not plan.scored_windows:
-            app.set_screen(FinalScreen(app, 0, 0, "First half already over",
-                                       title=_HALFTIME_LABEL))
+            no_half_left()
             return
         pool = _pool_from_feed(feed)
-        LiveFlow(app, feed, feed_client, fixture_id, pool, plan, sim,
-                 on_snapshot=persist).start()
+        LiveFlow(app, feed, feed_client, fixture_id, pool, half, clock,
+                 kickoff_epoch, sim, to_picker, on_snapshot=persist).start()
+
+    def begin() -> None:
+        choice = pick_half(feed.status_short(), feed.current_minute(),
+                           _HALF_MIN, _JOIN_CUTOFF)
+        if choice.half is None:
+            no_half_left()
+        elif choice.needs_wait:
+            app.set_screen(LiveWaitScreen(
+                app, feed, feed_client, fixture_id, target_minute=None,
+                on_ready=lambda: launch_half(2), poll_seconds=_POLL_SECONDS,
+                sim=sim, wait_for_second_half=True))
+        else:
+            launch_half(choice.half)
 
     app.set_screen(LiveWaitScreen(app, feed, feed_client, fixture_id,
                                   target_minute=None, on_ready=begin,

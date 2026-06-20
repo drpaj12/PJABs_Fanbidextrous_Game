@@ -16,7 +16,6 @@ from src.game.prediction import Prediction
 from src.game.roster import Roster
 from src.game.session import GameSession
 from src.game.window_report import WindowReport
-from src.game.live_schedule import LivePlan
 from src.ui.flow import LiveFlow, _HALF_MIN, _WINDOW_MIN
 from src.ui.sim import SimMode
 
@@ -62,8 +61,10 @@ def _hand() -> list[DraftedAthlete]:
 
 def _flow(feed: LiveFeed) -> LiveFlow:
     pool = _hand()
+    clock = HalfClock(_HALF_MIN, _WINDOW_MIN)
     flow = LiveFlow(_FakeApp(), feed, FeedClientStub(), fixture_id=1, pool=pool,
-                    plan=LivePlan(lobby_window=1, scored_windows=[1]), sim=SimMode(False))
+                    half=1, clock=clock, kickoff_epoch=0.0, sim=SimMode(False),
+                    to_picker=lambda: None)
     flow.session = GameSession(slot=0, roster=Roster(pool), pool=pool,
                                rng=random.Random(7))
     return flow
