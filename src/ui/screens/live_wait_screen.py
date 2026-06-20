@@ -169,7 +169,7 @@ class LiveWaitScreen(Screen):
         """Pre-game lobby, kickoff still far enough off that we are not polling yet."""
         self._draw_centered(surface, f"Kickoff in {format_countdown(self._secs)}",
                             "livewait_clock_size", 48, "livewait_clock_y", 320,
-                            _C["white"])
+                            _C["red"])
         if self._phase == PHASE_TOO_EARLY:
             warn = "Too early -- live data is not available yet."
             sub = "Team sheets post about an hour before kickoff."
