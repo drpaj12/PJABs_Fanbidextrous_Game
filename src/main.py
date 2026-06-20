@@ -5,6 +5,7 @@
   .venv/Scripts/python src/main.py --simdemo            # MockFeed demo + SIM hotkeys
   .venv/Scripts/python src/main.py --sim <slug>         # recorded match + SIM hotkeys
   .venv/Scripts/python src/main.py --live [fixture_id]  # LIVE match off the relay
+  .venv/Scripts/python src/main.py --launcher           # web-style menu: live vs test game
 """
 import asyncio
 import sys
@@ -20,7 +21,9 @@ from src.ui import flow
 
 async def main() -> None:
     app = App()
-    if "--sim" in sys.argv:
+    if "--launcher" in sys.argv:
+        flow.start_launcher(app, sim_mode="--simlive" in sys.argv)
+    elif "--sim" in sys.argv:
         slug = sys.argv[sys.argv.index("--sim") + 1]
         flow.start_simulation(app, f"assets/data/simulations/{slug}.json", sim_mode=True)
     elif "--live" in sys.argv:

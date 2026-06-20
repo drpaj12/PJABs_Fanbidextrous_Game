@@ -32,6 +32,7 @@ from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
+from src.ui.screens.launcher_screen import LauncherScreen
 from src.utils.constants import CONFIG, load_data
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ _POLL_SECONDS = CONFIG["feed"]["poll_seconds"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
 _PREGAME = CONFIG["pregame"]
 _LIVE = CONFIG["live"]
+_LAUNCHER = CONFIG["launcher"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -310,6 +312,22 @@ def start_live_select(app: "App", sim_mode: bool = False) -> None:
         start_live(app, fixture_id, sim_mode=sim_mode)
 
     app.set_screen(FixtureSelectScreen(app, fixtures, picked, sim))
+
+
+def start_launcher(app: "App", sim_mode: bool = False) -> None:
+    """Web entry: choose 'Live match' (real fixtures + relay) or 'Test game' (an offline
+    recorded match, no API/no waiting) so the full flow can be tried without a live game."""
+    def go_live() -> None:
+        start_live_select(app, sim_mode=sim_mode)
+
+    def go_sim() -> None:
+        start_simulation(app, _LAUNCHER["test_sim"], sim_mode=True)
+
+    options = [
+        (_LAUNCHER["live_label"], go_live),
+        (_LAUNCHER["sim_label"], go_sim),
+    ]
+    app.set_screen(LauncherScreen(app, options))
 
 
 def start_simulation(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:

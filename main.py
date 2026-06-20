@@ -6,7 +6,7 @@ from src.ui import flow
 
 async def main() -> None:
     app = App()
-    flow.start_live_select(app)   # match-day: pick one of the configured live fixtures
+    flow.start_launcher(app)   # pick Live match (real fixtures) or an offline test game
     await app.run()
 
 

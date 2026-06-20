@@ -72,6 +72,12 @@
       {"id": 1539006, "label": "Turkiye v Paraguay"}
     ]
   },
+  "launcher": {
+    "_comment": "Web entry menu: Live match (real fixtures + relay) vs an offline simulated test game. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
+    "live_label": "Live match",
+    "sim_label": "Test game (simulated)",
+    "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json"
+  },
   "assets": {
     "data_dir": "assets/data",
     "image_dir": "assets/images",
