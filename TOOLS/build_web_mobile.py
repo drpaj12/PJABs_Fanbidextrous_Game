@@ -6,8 +6,8 @@ Sibling to TOOLS/build_web.py, patched for portrait:
   - installs WEB_BUILD/index_mobile.html instead of index_desktop.html
   - outputs WEB_BUILD/game_web_mobile.zip
 
-600x900 is just a sensible portrait default -- if your game needs a
-different aspect ratio, change MOBILE_W/MOBILE_H below and the matching
+414x896 is the phone-portrait framebuffer (matches config/game_config.json) -- if your
+game needs a different aspect ratio, change MOBILE_W/MOBILE_H below and the matching
 fb_width/fb_height/fb_ar values in WEB_BUILD/index_mobile.html together.
 
 Usage:
@@ -28,8 +28,8 @@ import zipfile
 from pathlib import Path
 
 
-MOBILE_W, MOBILE_H = 600, 900
-MOBILE_AR = round(MOBILE_W / MOBILE_H, 4)  # 0.6667
+MOBILE_W, MOBILE_H = 414, 896
+MOBILE_AR = round(MOBILE_W / MOBILE_H, 4)  # 0.4621 (matches config/game_config.json)
 
 
 def _copy_project_tree(project_root: Path, staging: Path) -> None:
@@ -84,6 +84,12 @@ def main() -> None:
 
     print("Copying code, config, and assets...")
     _copy_project_tree(project_root, staging)
+
+    # Stamp the build id (the apk basename) into the bundled config so the running client
+    # can draw it on screen -- the fastest way to spot a stale browser cache. Written only
+    # into the staging copy, so the repo's config/ stays clean.
+    (staging / "config" / "build_id.txt").write_text(staging.name, encoding="utf-8")
+    print(f"  Build id: {staging.name}")
 
     staging_size = sum(f.stat().st_size for f in staging.rglob("*") if f.is_file())
     print(f"Staging size: {staging_size / 1024 / 1024:.1f} MB")
