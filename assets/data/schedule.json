@@ -1,0 +1,12 @@
+{
+  "_comment": "Curated live-game schedule for the viewer. kickoff_utc (ISO 8601 UTC) drives ALL time math; kickoff_local is a pre-baked US Eastern display string (EDT = UTC-4 in June 2026) -- no timezone code. home/away may be blank for undetermined knockout matchups; the round descriptor is shown instead. ids match API-Football fixture ids where known.",
+  "games": [
+    {"id": 1539006, "competition": "FIFA World Cup 2026", "home": "Turkiye", "away": "Paraguay", "round": "Group H", "kickoff_utc": "2026-06-20T03:00:00Z", "kickoff_local": "11:00 PM EDT (Jun 19)"},
+    {"id": 1539007, "competition": "FIFA World Cup 2026", "home": "Netherlands", "away": "Sweden", "round": "Group F", "kickoff_utc": "2026-06-20T17:00:00Z", "kickoff_local": "1:00 PM EDT"},
+    {"id": 1489393, "competition": "FIFA World Cup 2026", "home": "Germany", "away": "Ivory Coast", "round": "Group E", "kickoff_utc": "2026-06-20T20:00:00Z", "kickoff_local": "4:00 PM EDT"},
+    {"id": 1539020, "competition": "FIFA World Cup 2026", "home": "Argentina", "away": "Mexico", "round": "Group D", "kickoff_utc": "2026-06-21T19:00:00Z", "kickoff_local": "3:00 PM EDT"},
+    {"id": 9001, "competition": "MLS", "home": "Inter Miami", "away": "Orlando City", "round": "Matchday 20", "kickoff_utc": "2026-06-21T23:30:00Z", "kickoff_local": "7:30 PM EDT"},
+    {"id": 9002, "competition": "MLS", "home": "LA Galaxy", "away": "Seattle Sounders", "round": "Matchday 20", "kickoff_utc": "2026-06-22T02:00:00Z", "kickoff_local": "10:00 PM EDT (Jun 21)"},
+    {"id": 1539050, "competition": "FIFA World Cup 2026", "home": "", "away": "", "round": "Round of 16 - Match 50", "kickoff_utc": "2026-06-29T20:00:00Z", "kickoff_local": "4:00 PM EDT"}
+  ]
+}
