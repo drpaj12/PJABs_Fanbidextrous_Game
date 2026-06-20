@@ -1,7 +1,11 @@
 # tests/test_live_play_screen_logic.py
-"""Unit tests for the one piece of pure logic in the live play screen:
-mapping newly-entered windows to (lock, resolve) actions."""
-from src.ui.screens.live_play_screen import lock_and_resolve_plan
+"""Unit tests for the pure logic in the live play screen: mapping newly-entered windows to
+(lock, resolve) actions, and gating resolution on feed data availability."""
+from src.game.half_clock import HalfClock
+from src.ui.screens.live_play_screen import lock_and_resolve_plan, windows_ready
+
+# 45-min half, 5-min windows -> window_end(1)=5, (2)=10, (3)=15, ...
+CLOCK = HalfClock(45, 5)
 
 
 def test_kickoff_locks_w1_resolves_nothing() -> None:
@@ -19,3 +23,22 @@ def test_focus_skip_chains_locks_and_resolves() -> None:
 def test_mid_half_join_does_not_resolve_unowned_window() -> None:
     # joined editing window 6; entering 6 must not try to resolve window 5
     assert lock_and_resolve_plan([6], editing_start=6) == [(6, None)]
+
+
+def test_windows_ready_only_when_feed_covers_window_end() -> None:
+    pending = {1, 2, 3}  # ends 5, 10, 15
+    assert windows_ready(pending, last_known_minute=5, clock=CLOCK) == [1]
+    assert windows_ready(pending, last_known_minute=12, clock=CLOCK) == [1, 2]
+    assert windows_ready(pending, last_known_minute=15, clock=CLOCK) == [1, 2, 3]
+
+
+def test_windows_ready_holds_back_slept_through_windows() -> None:
+    # tab backgrounded from 12' to the catch-up poll: nothing resolves while the feed is
+    # stale at minute 12, then all queued windows clear once the fresh poll lands at 31.
+    pending = {4, 5, 6}  # ends 20, 25, 30
+    assert windows_ready(pending, last_known_minute=12, clock=CLOCK) == []
+    assert windows_ready(pending, last_known_minute=31, clock=CLOCK) == [4, 5, 6]
+
+
+def test_windows_ready_empty_pending() -> None:
+    assert windows_ready(set(), last_known_minute=99, clock=CLOCK) == []

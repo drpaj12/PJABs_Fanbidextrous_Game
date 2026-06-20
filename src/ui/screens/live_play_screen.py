@@ -35,6 +35,7 @@ from src.game.prediction import Prediction
 from src.game.athlete import DraftedAthlete
 from src.game.live_feed import LiveFeed
 from src.game.match_clock import MatchClock
+from src.game.half_clock import HalfClock
 from src.game.window_report import WindowReport
 from src.game.kickoff import (seconds_to_kickoff, kickoff_phase, format_minutes,
                               PHASE_ACTIVE)
@@ -62,6 +63,18 @@ def lock_and_resolve_plan(entered: list[int],
         resolve = w - 1 if (w - 1) >= editing_start else None
         out.append((w, resolve))
     return out
+
+
+def windows_ready(pending: set[int], last_known_minute: int,
+                  clock: HalfClock) -> list[int]:
+    """Of the windows queued for resolution, those whose end minute the feed now covers.
+
+    A window must NOT resolve until the feed holds a snapshot at or past its end minute --
+    otherwise a window slept through (tab backgrounded) or stalled during a lead outage
+    would score against stale cumulative totals (every stat reads delta 0, and the whole
+    catch-up jump later dumps onto one window). Gating on data availability keeps the totals
+    credited even when per-window granularity across a long gap cannot be reconstructed."""
+    return sorted(w for w in pending if last_known_minute >= clock.window_end(w))
 
 
 class LivePlayScreen(Screen):
@@ -101,6 +114,9 @@ class LivePlayScreen(Screen):
         # window -> (preds, active_id, use_power)
         self._locked: dict[int, tuple[list[Prediction], Optional[str], bool]] = {}
         self.last_report: Optional[WindowReport] = None
+        # Windows locked at a boundary but waiting for the feed to cover their end minute
+        # before they resolve (focus-loss / lead-outage safety -- see windows_ready()).
+        self._pending_resolve: set[int] = set()
 
         # -- wall-clock + polling --
         now = self.now_fn()
@@ -191,22 +207,38 @@ class LivePlayScreen(Screen):
                 and now - self._last_poll_epoch >= self.poll_seconds):
             self._kick_poll(now)
 
-        # Lock each newly-entered window and resolve the one before it.
+        # Lock each newly-entered window and queue the one before it for resolution.
         for lock_w, resolve_w in lock_and_resolve_plan(
                 self.mc.windows_entered(self._last_now, now), self.editing_start):
             self._lock_window(lock_w)
             if (resolve_w is not None and resolve_w in self._locked
                     and self._locked[resolve_w][1]):
-                self._resolve_window(resolve_w)
+                self._pending_resolve.add(resolve_w)
             self.edit_window = lock_w + 1
             self._reset_editor()
         self._last_now = now
+
+        # Resolve queued windows only once the feed actually covers their end minute, so a
+        # window slept through (or stalled during a lead outage) scores against real totals
+        # instead of stale zeros. The catch-up poll lands a frame or two after we wake.
+        self._drain_pending()
 
         # Half over: resolve the final (ET) window if owned, then hand off to the flow.
         if self.feed.match_status() in (_HALFTIME_STATUS, _FINISHED_STATUS):
             self._handle_halftime()
 
+    def _drain_pending(self) -> None:
+        for w in windows_ready(self._pending_resolve, self.feed.last_known_minute(),
+                               self.mc.clock):
+            self._resolve_window(w)
+            self._pending_resolve.discard(w)
+
     def _handle_halftime(self) -> None:
+        # Match over: force-resolve anything still waiting on data (best effort with whatever
+        # totals we have), then the ET window if owned.
+        for w in sorted(self._pending_resolve):
+            self._resolve_window(w)
+        self._pending_resolve.clear()
         et = self.mc.clock.extra_time_window
         if et in self._locked and self._locked[et][1]:
             self._resolve_window(et)
