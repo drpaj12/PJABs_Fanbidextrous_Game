@@ -3,6 +3,7 @@
 import asyncio
 import pygame
 from src.utils.constants import CONFIG
+from src.ui.widgets import font
 
 _D = CONFIG["display"]
 _C = CONFIG["colors"]
@@ -14,7 +15,7 @@ class App:
         self.screen = pygame.display.set_mode((_D["width"], _D["height"]))
         pygame.display.set_caption(_D["title"])
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("arial", 22)
+        self.font = font(22)
         self.running = True
         self.current = None  # set by set_screen
         self.overlay = None          # callable(surface) drawn on top each frame

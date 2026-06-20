@@ -21,6 +21,16 @@ _LEAD_NAME = CONFIG["client"]["lead_username"]
 _MAX_LEN = 16
 
 
+def _set_text_input(on: bool) -> None:
+    """Toggle SDL text input (raises the soft keyboard on mobile). Best-effort: some
+    pygbag/WASM backends do not implement it, so never let it crash the screen."""
+    fn = "start_text_input" if on else "stop_text_input"
+    try:
+        getattr(pygame.key, fn)()
+    except Exception:
+        pass
+
+
 class UsernameScreen(Screen):
     def __init__(self, app: "App", on_submit: Callable[[str], None]) -> None:
         super().__init__(app)
@@ -35,8 +45,7 @@ class UsernameScreen(Screen):
         self.field = pygame.Rect(x, LAYOUT.i("user_field_y", 330), bw, bh)
         self.start_btn = Button(
             pygame.Rect(x, LAYOUT.i("user_btn_y", 430), bw, bh), "Start")
-        if hasattr(pygame.key, "start_text_input"):
-            pygame.key.start_text_input()
+        _set_text_input(True)
 
     def handle(self, event: pygame.event.Event) -> None:
         if self._submitted:
@@ -61,8 +70,7 @@ class UsernameScreen(Screen):
         if self._submitted or not self.text.strip():
             return
         self._submitted = True
-        if hasattr(pygame.key, "stop_text_input"):
-            pygame.key.stop_text_input()
+        _set_text_input(False)
         self.on_submit(self.text.strip())
 
     def update(self, dt: float) -> None:

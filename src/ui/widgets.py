@@ -7,9 +7,24 @@ from src.utils.constants import CONFIG, LAYOUT
 _C = CONFIG["colors"]
 
 
+_USE_SYSFONT = True
+
+
 def font(size: int) -> pygame.font.Font:
-    """A SysFont of the given pixel size (cached by pygame internally)."""
-    return pygame.font.SysFont("arial", size)
+    """A font of the given pixel size.
+
+    Tries the system 'arial' (nice on desktop), but the pygbag/WASM runtime ships no
+    system fonts -- SysFont can raise or hang there -- so on first failure we switch
+    permanently to pygame's built-in default font. Using the default font is the
+    standard pygbag-safe choice; this keeps desktop crisp and the web build alive.
+    """
+    global _USE_SYSFONT
+    if _USE_SYSFONT:
+        try:
+            return pygame.font.SysFont("arial", size)
+        except Exception:
+            _USE_SYSFONT = False
+    return pygame.font.Font(None, size)
 
 
 class Button:

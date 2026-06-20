@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 import pygame
 from src.ui.screens.base import Screen
-from src.ui.widgets import MeterBar
+from src.ui.widgets import MeterBar, font
 from src.utils.constants import CONFIG
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ class WatchScreen(Screen):
         s = self.get_state()
         f = self.app.font
         surface.blit(f.render(f"Window {s['window']}   {s['clock']}", True, _C["text"]), (20, 40))
-        big = pygame.font.SysFont("arial", 56)
+        big = font(56)
         surface.blit(big.render(f"{s['team']} - {s['opp']}", True, _C["white"]), (20, 90))
         surface.blit(f.render("Attack", True, _C["text_dim"]), (20, 176))
         self.success_bar.draw(surface, s["success"], _M["success_threshold"])
