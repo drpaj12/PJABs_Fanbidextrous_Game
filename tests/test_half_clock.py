@@ -40,3 +40,25 @@ def test_extra_time_starts_at_the_half_mark():
 def test_half_over_only_on_the_halftime_status():
     assert HalfClock.is_half_over("halftime", "halftime") is True
     assert HalfClock.is_half_over("live", "halftime") is False
+
+
+def test_first_half_offset_is_zero_by_default() -> None:
+    c = HalfClock(45, 5)
+    assert c.start_minute == 0
+    assert c.window_start(1) == 0
+    assert c.window_end(1) == 5
+    assert c.window_end(9) == 45
+
+
+def test_second_half_offsets_to_absolute_minutes() -> None:
+    c = HalfClock(45, 5, start_minute=45)
+    assert c.window_start(1) == 45
+    assert c.window_end(1) == 50
+    assert c.window_end(9) == 90
+
+
+def test_second_half_extra_time_starts_at_ninety() -> None:
+    c = HalfClock(45, 5, start_minute=45)
+    assert c.window_start(c.extra_time_window) == 90
+    assert c.regular_windows == 9
+    assert c.extra_time_window == 10

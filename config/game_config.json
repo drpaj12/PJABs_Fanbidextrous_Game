@@ -26,7 +26,9 @@
     "rng_seed": 99,
     "half_minutes": 45,
     "half_label": "First Half",
+    "second_half_label": "Second Half",
     "halftime_label": "Half Time",
+    "fulltime_label": "Full Time",
     "extra_time_label": "Extra Time"
   },
   "scoring": {
@@ -74,6 +76,8 @@
     "competition_label": "FIFA World Cup 2026",
     "warn_minutes_before": 60,
     "start_minutes_before": 15,
+    "join_cutoff_minute": 22,
+    "resync_threshold_seconds": 30,
     "fixtures": [
       {"id": 1539007, "label": "Netherlands v Sweden", "kickoff": "2026-06-20T17:00:00+00:00"},
       {"id": 1489393, "label": "Germany v Ivory Coast", "kickoff": "2026-06-20T20:00:00+00:00"},

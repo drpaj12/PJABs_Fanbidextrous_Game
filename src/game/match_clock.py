@@ -17,8 +17,29 @@ class MatchClock:
 
     def current_minute(self, now: float) -> int:
         """Live match minute, clamped at 0 before kickoff. Pure wall-clock -- it keeps
-        advancing with no API input."""
+        advancing with no API input. Half-relative (0..45); see display_minute for the
+        absolute match minute."""
         return max(0, int((now - self.kickoff_epoch) // 60))
+
+    def display_minute(self, now: float) -> int:
+        """Absolute match minute for display (offsets current_minute by the half's
+        start_minute), so the second half reads 46'-90' instead of 1'-45'."""
+        return self.clock.start_minute + self.current_minute(now)
+
+    def realign(self, api_minute_in_half: int, now: float,
+                threshold_seconds: float) -> "MatchClock":
+        """Snap the wall-clock anchor to the API's reported minute when our estimate has
+        drifted past threshold_seconds; otherwise return self unchanged. The initial anchor
+        (config kickoff for 1H, an estimate for 2H) self-corrects each poll.
+
+        api_minute_in_half is the API match minute mapped into this half (0-based:
+        max(0, api_elapsed - clock.start_minute)). We compare against the MIDPOINT of that
+        integer minute so a clock sitting mid-minute is not treated as drifted."""
+        our_elapsed = now - self.kickoff_epoch
+        api_elapsed = (api_minute_in_half + 0.5) * 60
+        if abs(our_elapsed - api_elapsed) > threshold_seconds:
+            return MatchClock(now - api_elapsed, self.clock)
+        return self
 
     def playing_window(self, now: float) -> int:
         """1-based index of the window currently in progress; 0 before kickoff. Caps at the

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 class HalfClock:
     half_minutes: int
     window_minutes: int
+    start_minute: int = 0   # 0 for the first half, 45 for the second (absolute match minutes)
 
     @property
     def regular_windows(self) -> int:
@@ -32,12 +33,14 @@ class HalfClock:
         return window >= self.extra_time_window
 
     def window_start(self, window: int) -> int:
-        """First minute of a window. Valid for regular and ET windows."""
-        return (window - 1) * self.window_minutes
+        """First (absolute) match minute of a window. Valid for regular and ET windows.
+        Offset by start_minute so the second half returns 45.. instead of 0.."""
+        return self.start_minute + (window - 1) * self.window_minutes
 
     def window_end(self, window: int) -> int:
-        """Last minute of a REGULAR window. Meaningless for ET (end is discovered)."""
-        return window * self.window_minutes
+        """Last (absolute) match minute of a REGULAR window. Meaningless for ET (end is
+        discovered). Offset by start_minute (45.. in the second half)."""
+        return self.start_minute + window * self.window_minutes
 
     @staticmethod
     def is_half_over(status: str, halftime_status: str) -> bool:
