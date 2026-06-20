@@ -65,8 +65,9 @@ def test_cumulative_timeline_is_monotonic_and_per_minute():
     assert snaps[3]["stats"]["goals"] == 1
     assert snaps[3]["stats"]["shots_on_goal"] == 1
     assert snaps[3]["stats"]["corner_kicks"] == 1
-    # at minute 7: +1 save, +1 card, +1 on-target shot (saved)
-    assert snaps[7]["stats"]["goalkeeper_saves"] == 1
+    # at minute 7: +1 card, +1 on-target shot (saved). The save increment targets
+    # goalkeeper_saves, which is no longer a tracked field, so it is silently dropped.
+    assert "goalkeeper_saves" not in snaps[7]["stats"]
     assert snaps[7]["stats"]["cards"] == 1
     assert snaps[7]["stats"]["shots_on_goal"] == 2
     # cumulative never decreases

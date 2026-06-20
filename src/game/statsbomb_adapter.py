@@ -5,11 +5,18 @@ No network and no pygame here. The fetching lives in scripts/build_simulation_fr
 this module only transforms already-parsed JSON (lists of dicts) into the engine's feed schema.
 
 The five engine stat fields (api-field key space, matching src/game/normalize_soccer):
-    corner_kicks, shots_on_goal, goalkeeper_saves, goals, cards
+    corner_kicks, shots_on_goal, fouls, goals, cards
+
+NOTE: the live stat menu dropped Saves and added Fouls (Task 1). STAT_FIELDS now matches
+that set. _stat_increments still recognises Goal Keeper "Saved" events but emits
+goalkeeper_saves, which is no longer a tracked field -- cumulative_timeline silently
+ignores any increment not in STAT_FIELDS. Foul-event classification is not yet wired, so
+any sim regenerated from StatsBomb open data carries fouls=0 until that is added; bundled
+pre-generated sims predate this change and resolve fouls to 0 as well.
 """
 import unicodedata
 
-STAT_FIELDS = ("corner_kicks", "shots_on_goal", "goalkeeper_saves", "goals", "cards")
+STAT_FIELDS = ("corner_kicks", "shots_on_goal", "fouls", "goals", "cards")
 
 _ON_TARGET = {"Goal", "Saved", "Saved to Post"}
 
@@ -85,6 +92,8 @@ def cumulative_timeline(events: list[dict], last_minute: int) -> list[dict]:
     for event in events:
         minute = _event_minute(event)
         for field in _stat_increments(event):
+            if field not in STAT_FIELDS:        # e.g. goalkeeper_saves, no longer tracked
+                continue
             per_minute.setdefault(minute, {f: 0 for f in STAT_FIELDS})[field] += 1
 
     snapshots: list[dict] = []

@@ -71,11 +71,13 @@ class LiveWaitScreen(Screen):
         self._did_initial_poll = False
         self._fired = False
         self._error = ""
+        self._poll_count = 0
         self._secs: Optional[int] = None
         self._phase = PHASE_ACTIVE
 
     # -- polling ------------------------------------------------------------
     async def _poll(self) -> None:
+        self._poll_count += 1
         try:
             snapshot = await self.feed_client.get_feed(self.fixture_id)
             self.feed.record(snapshot)

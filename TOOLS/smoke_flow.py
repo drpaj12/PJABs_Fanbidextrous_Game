@@ -1,10 +1,15 @@
 # TOOLS/smoke_flow.py
-"""Headless smoke test: drive the full SIM flow to FinalScreen, no window.
+"""Headless smoke tests: drive the game with no real window, no network.
+
+Two independent checks run from __main__ (both must pass for exit 0):
+
+1. Offline SIM flow -- Splash -> ... -> FinalScreen via SIM hotkeys (see main()).
+2. Live-screen lifecycle -- drive LivePlayScreen directly with an injected wall clock
+   and a pre-warmed LiveFeed (no asyncio loop, no relay): assert each window locks in
+   order and on_finished fires at half time (see live_smoke()).
 
 Run: SDL_VIDEODRIVER=dummy .venv/Scripts/python TOOLS/smoke_flow.py [slug]
-Steps the app loop manually (App.run is an endless coroutine) feeding SIM hotkeys
-appropriate to whichever screen is current, and asserts we reach FinalScreen with
-no exception inside a bounded number of frames.
+The first arg, if given, selects the offline simulation slug only.
 """
 import os
 import sys
@@ -97,5 +102,141 @@ def main() -> int:
     return 1
 
 
+# --------------------------------------------------------------------------- #
+# Live-screen lifecycle smoke
+# --------------------------------------------------------------------------- #
+# Drives LivePlayScreen with NO pygame event loop and NO network. The LiveFeed is
+# pre-warmed with relay-shaped snapshots built from flow._demo_script, and time is fed
+# through an injected now_fn the driver advances 60s per step. The screen's poll path is
+# fire-and-forget (asyncio.ensure_future); with the feed already warm it never blocks, so
+# update() drives the window boundary logic deterministically off the injected clock.
+
+# Reverse of normalize_soccer._STAT_FIELD: engine field -> API-Football statistic "type".
+# goals are carried on the fixture payload (not the statistics endpoint), so they are not
+# emitted here as a statistic row.
+_FIELD_TO_API = {
+    "corner_kicks": "Corner Kicks",
+    "shots_on_goal": "Shots on Goal",
+    "fouls": "Fouls",
+    "cards": "Yellow Cards",
+}
+
+
+def _relay_snapshot(stats: dict, elapsed: int, status_short: str) -> dict:
+    """Build one relay-shaped snapshot (the feed_cache.php shape LiveFeed.record ingests)
+    from a flat demo stats dict at a given match minute/status."""
+    rows = [{"type": _FIELD_TO_API[f], "value": stats.get(f, 0)}
+            for f in _FIELD_TO_API]
+    return {
+        "fixture": {"response": [{
+            "fixture": {"status": {"short": status_short, "elapsed": elapsed},
+                        "date": "2026-06-20T00:00:00+00:00"},
+            "teams": {"home": {"name": "Canada"}, "away": {"name": "Mexico"}},
+            "goals": {"home": stats.get("goals", 0), "away": 0},
+        }]},
+        "statistics": {"response": [{"statistics": rows}]},
+        "lineups": {"response": []},
+    }
+
+
+def live_smoke() -> int:
+    """Drive LivePlayScreen through a full first half headlessly. Returns 0 on OK."""
+    from src.ui.app import App
+    from src.ui import flow
+    from src.game.live_feed import LiveFeed
+    from src.game.half_clock import HalfClock
+    from src.game.match_clock import MatchClock
+    from src.game.window_report import build_window_report
+    from src.ui.sim import SimMode
+    from src.ui.screens.live_play_screen import LivePlayScreen
+    from src.sync.feed_client import FeedClient
+    from src.utils.constants import CONFIG
+
+    half_min = CONFIG["game"]["half_minutes"]
+    window_min = CONFIG["game"]["window_seconds"] // 60
+    poll_seconds = CONFIG["feed"]["poll_seconds"]
+    stat_labels = flow._STAT_LABELS
+
+    # Pre-warm the feed with the in-play (1H) snapshots only. The final halftime snapshot
+    # is withheld and recorded by the driver once the injected clock reaches it -- otherwise
+    # the feed would report halftime on the first update() and short-circuit the boundary
+    # logic before any window locks. The demo script reports halftime at minute 48 (3
+    # minutes of first-half stoppage).
+    demo = flow._demo_script()
+    halftime_snap = demo["snapshots"][-1]
+    halftime_minute = halftime_snap["minute"]
+    feed = LiveFeed()
+    for snap in demo["snapshots"][:-1]:                   # all but the halftime snapshot
+        minute = snap["minute"]
+        feed.record(_relay_snapshot(snap["stats"], minute, "1H"), minute=minute)
+
+    clock = HalfClock(half_min, window_min)
+    et_window = clock.extra_time_window
+
+    # Manually-advanced wall clock. kickoff at epoch 0; advance 60s per loop -> 1 match
+    # minute per step, so window boundaries (every window_min minutes) pass on schedule.
+    holder = {"t": 0.0}
+    now_fn = lambda: holder["t"]
+    match_clock = MatchClock(kickoff_epoch=0.0, clock=clock)
+    editing_start = match_clock.editing_window(now_fn())
+
+    available = flow._demo_pool()[:6]
+
+    locks: list[int] = []
+
+    def on_lock(window, preds, active_id, use_power):
+        """Record the lock and return a valid WindowReport (scoring is unit-tested
+        elsewhere; this only feeds the screen's inline-reveal path)."""
+        locks.append(window)
+        return build_window_report(
+            window=window, predictions=preds, actuals={},
+            stat_labels=stat_labels, success_value=0, concede_value=0,
+            success_threshold=CONFIG["meter"]["success_threshold"],
+            concede_threshold=CONFIG["meter"]["concede_threshold"],
+            success_fired=False, concede_fired=False)
+
+    finished = {"done": False}
+
+    def on_finished():
+        finished["done"] = True
+
+    app = App()
+    feed_client = FeedClient(CONFIG["relay"]["base_url"],
+                             feed_path=CONFIG["relay"]["feed_path"], is_lead=True)
+    sim = SimMode(False)
+    screen = LivePlayScreen(
+        app=app, feed=feed, feed_client=feed_client, match_clock=match_clock,
+        fixture_id=1, editing_window_start=editing_start, on_lock=on_lock,
+        on_finished=on_finished, poll_seconds=poll_seconds, available=available,
+        now_fn=now_fn, sim=sim)
+
+    ok = True
+    for step in range(0, 55):
+        holder["t"] += 60.0                  # advance one match minute
+        minute = int(holder["t"] // 60)
+        if minute >= halftime_minute:        # half-time snapshot arrives on the clock
+            feed.record(_relay_snapshot(halftime_snap["stats"], minute, "HT"),
+                        minute=minute)
+        screen._auto_pick()                  # lock all dials + pick an active player
+        screen.update(0.0)
+        if finished["done"]:
+            break
+
+    expected = list(range(editing_start, et_window + 1))
+    in_order = locks == sorted(locks)
+    locked_expected = locks == expected
+    if not (finished["done"] and in_order and locked_expected):
+        ok = False
+
+    print(("OK" if locked_expected else "FAIL"),
+          "live smoke: locked windows =", locks, "(expected", expected, ")")
+    print(("OK" if in_order else "FAIL"), "live smoke: windows locked in order")
+    print(("OK" if finished["done"] else "FAIL"),
+          "live smoke: reached final screen (on_finished fired)")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    rc_offline = main()
+    rc_live = live_smoke()
+    raise SystemExit(rc_offline or rc_live)
