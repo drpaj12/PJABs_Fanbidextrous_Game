@@ -86,7 +86,7 @@
     "schedule": {
       "_comment": "Picker source. file = assets/data basename. lookahead_hours/drop_after_hours bound the rolling window; live_window_minutes is the generous span a game is treated as live (2 halves + stoppage + HT) since the viewer does not poll the API; soon_minutes is the 'soon' threshold.",
       "file": "schedule.json",
-      "lookahead_hours": 48,
+      "lookahead_hours": 240,
       "drop_after_hours": 4,
       "live_window_minutes": 150,
       "soon_minutes": 15
