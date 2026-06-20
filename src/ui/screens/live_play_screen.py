@@ -54,7 +54,8 @@ _START_S = CONFIG["live"]["start_minutes_before"] * 60
 _START_MIN = CONFIG["live"]["start_minutes_before"]
 
 
-def lock_and_resolve_plan(entered: list[int], editing_start: int) -> list:
+def lock_and_resolve_plan(entered: list[int],
+                          editing_start: int) -> list[tuple[int, Optional[int]]]:
     """For each newly entered window w: (lock=w, resolve=w-1 or None when w-1<editing_start)."""
     out = []
     for w in entered:
