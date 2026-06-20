@@ -11,6 +11,7 @@ lead client should be polling yet:
     still no polling.
   * active    -> within the start threshold, or the match is already under way; poll.
 """
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -50,11 +51,8 @@ def kickoff_phase(seconds: Optional[int], status: str,
     return PHASE_ACTIVE
 
 
-def format_countdown(seconds: int) -> str:
-    """H:MM:SS once an hour or more out, else MM:SS. Clamped at 00:00 (never negative)."""
-    s = max(0, int(seconds))
-    hours, rem = divmod(s, 3600)
-    minutes, secs = divmod(rem, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+def format_minutes(seconds: int) -> str:
+    """Whole-minute countdown label, e.g. "24 min". Rounds up so the 16th minute reads
+    "16 min" until the clock hits exactly 15:00. Clamped at "0 min" (never negative)."""
+    mins = max(0, math.ceil(seconds / 60))
+    return f"{mins} min"

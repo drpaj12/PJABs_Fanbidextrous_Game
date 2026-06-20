@@ -31,7 +31,7 @@ from src.ui.screens.base import Screen
 from src.ui.sim import SimMode
 from src.ui.widgets import font
 from src.game.live_feed import LiveFeed
-from src.game.kickoff import (seconds_to_kickoff, kickoff_phase, format_countdown,
+from src.game.kickoff import (seconds_to_kickoff, kickoff_phase, format_minutes,
                               PHASE_TOO_EARLY, PHASE_SOON, PHASE_ACTIVE)
 from src.sync.feed_client import FeedClient
 from src.utils.constants import CONFIG, LAYOUT
@@ -167,7 +167,7 @@ class LiveWaitScreen(Screen):
 
     def _draw_pregame(self, surface: pygame.Surface) -> None:
         """Pre-game lobby, kickoff still far enough off that we are not polling yet."""
-        self._draw_centered(surface, f"Kickoff in {format_countdown(self._secs)}",
+        self._draw_centered(surface, f"Kickoff in {format_minutes(self._secs)}",
                             "livewait_clock_size", 48, "livewait_clock_y", 320,
                             _C["red"])
         if self._phase == PHASE_TOO_EARLY:

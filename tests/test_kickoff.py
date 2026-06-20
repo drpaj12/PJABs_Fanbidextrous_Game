@@ -1,5 +1,5 @@
 from src.game.kickoff import (
-    seconds_to_kickoff, kickoff_phase, format_countdown,
+    seconds_to_kickoff, kickoff_phase, format_minutes,
     PHASE_TOO_EARLY, PHASE_SOON, PHASE_ACTIVE,
 )
 
@@ -38,7 +38,9 @@ def test_phase_active_when_match_under_way_or_unknown():
     assert kickoff_phase(None, "scheduled", warn, start) == PHASE_ACTIVE  # no kickoff time
 
 
-def test_format_countdown():
-    assert format_countdown(90) == "01:30"
-    assert format_countdown(5400) == "1:30:00"
-    assert format_countdown(-10) == "00:00"
+def test_format_minutes():
+    assert format_minutes(900) == "15 min"   # exactly 15:00
+    assert format_minutes(901) == "16 min"   # rounds up
+    assert format_minutes(1440) == "24 min"  # 24:00
+    assert format_minutes(5400) == "90 min"  # 90 min out (pure minutes, no hours)
+    assert format_minutes(-10) == "0 min"
