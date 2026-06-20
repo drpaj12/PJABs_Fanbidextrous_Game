@@ -236,7 +236,129 @@ def live_smoke() -> int:
     return 0 if ok else 1
 
 
+def _demo_script_2h() -> dict:
+    """A full second half: cumulative stats every 5 minutes at ABSOLUTE match minutes
+    45-90 (feed snapshots are keyed by absolute minute), plus 3 minutes of stoppage
+    (90 -> 93) with a full-time status at minute 93."""
+    return {
+        "snapshots": [
+            {"minute": 45, "stats": {"corner_kicks": 9,  "shots_on_goal": 9,  "fouls": 17, "goals": 2, "cards": 2}},
+            {"minute": 50, "stats": {"corner_kicks": 10, "shots_on_goal": 10, "fouls": 19, "goals": 2, "cards": 2}},
+            {"minute": 55, "stats": {"corner_kicks": 11, "shots_on_goal": 11, "fouls": 21, "goals": 2, "cards": 3}},
+            {"minute": 60, "stats": {"corner_kicks": 12, "shots_on_goal": 12, "fouls": 23, "goals": 2, "cards": 3}},
+            {"minute": 65, "stats": {"corner_kicks": 13, "shots_on_goal": 13, "fouls": 25, "goals": 3, "cards": 3}},
+            {"minute": 70, "stats": {"corner_kicks": 14, "shots_on_goal": 14, "fouls": 27, "goals": 3, "cards": 3}},
+            {"minute": 75, "stats": {"corner_kicks": 15, "shots_on_goal": 15, "fouls": 29, "goals": 3, "cards": 4}},
+            {"minute": 80, "stats": {"corner_kicks": 16, "shots_on_goal": 16, "fouls": 31, "goals": 3, "cards": 4}},
+            {"minute": 85, "stats": {"corner_kicks": 17, "shots_on_goal": 17, "fouls": 33, "goals": 4, "cards": 4}},
+            {"minute": 90, "stats": {"corner_kicks": 18, "shots_on_goal": 18, "fouls": 35, "goals": 4, "cards": 4}},
+            {"minute": 93, "stats": {"corner_kicks": 19, "shots_on_goal": 18, "fouls": 37, "goals": 4, "cards": 4}},
+        ],
+    }
+
+
+def live_smoke_2h() -> int:
+    """Drive LivePlayScreen through a full SECOND half headlessly. Mirrors live_smoke()
+    but with a start_minute=45 clock: feed snapshots are keyed by absolute match minute
+    (45-93), the in-play status is 2H (-> live) and the terminal status is FT (-> finished).
+    Asserts the 2H windows lock in order, the per-poll re-align does not break ordering, and
+    on_finished fires at full time. Returns 0 on OK."""
+    from src.ui.app import App
+    from src.ui import flow
+    from src.game.live_feed import LiveFeed
+    from src.game.half_clock import HalfClock
+    from src.game.match_clock import MatchClock
+    from src.game.window_report import build_window_report
+    from src.ui.sim import SimMode
+    from src.ui.screens.live_play_screen import LivePlayScreen
+    from src.sync.feed_client import FeedClient
+    from src.utils.constants import CONFIG
+
+    half_min = CONFIG["game"]["half_minutes"]
+    window_min = CONFIG["game"]["window_seconds"] // 60
+    poll_seconds = CONFIG["feed"]["poll_seconds"]
+    resync_threshold = CONFIG["live"]["resync_threshold_seconds"]
+    second_half_label = CONFIG["game"]["second_half_label"]
+    stat_labels = flow._STAT_LABELS
+
+    # Pre-warm with the in-play (2H) snapshots only; withhold the full-time snapshot so the
+    # feed does not report finished on the first update() and short-circuit before any window
+    # locks. The driver records FT once the injected clock reaches it.
+    demo = _demo_script_2h()
+    ft_snap = demo["snapshots"][-1]
+    ft_minute = ft_snap["minute"]                        # absolute (93)
+    feed = LiveFeed()
+    for snap in demo["snapshots"][:-1]:                   # all but the full-time snapshot
+        minute = snap["minute"]
+        feed.record(_relay_snapshot(snap["stats"], minute, "2H"), minute=minute)
+
+    clock = HalfClock(half_min, window_min, start_minute=half_min)   # second-half clock
+    et_window = clock.extra_time_window
+
+    # Wall clock anchored at the second-half kickoff (epoch 0 == in-half minute 0); advance
+    # 60s per loop so one in-half match minute passes per step.
+    holder = {"t": 0.0}
+    now_fn = lambda: holder["t"]
+    match_clock = MatchClock(kickoff_epoch=0.0, clock=clock)
+    editing_start = match_clock.editing_window(now_fn())
+
+    available = flow._demo_pool()[:6]
+
+    locks: list[int] = []
+
+    def on_lock(window, preds, active_id, use_power):
+        locks.append(window)
+        return build_window_report(
+            window=window, predictions=preds, actuals={},
+            stat_labels=stat_labels, success_value=0, concede_value=0,
+            success_threshold=CONFIG["meter"]["success_threshold"],
+            concede_threshold=CONFIG["meter"]["concede_threshold"],
+            success_fired=False, concede_fired=False)
+
+    finished = {"done": False}
+
+    def on_finished():
+        finished["done"] = True
+
+    app = App()
+    feed_client = FeedClient(CONFIG["relay"]["base_url"],
+                             feed_path=CONFIG["relay"]["feed_path"], is_lead=True)
+    sim = SimMode(False)
+    screen = LivePlayScreen(
+        app=app, feed=feed, feed_client=feed_client, match_clock=match_clock,
+        fixture_id=1, editing_window_start=editing_start, on_lock=on_lock,
+        on_finished=on_finished, poll_seconds=poll_seconds, available=available,
+        half_label=second_half_label, resync_threshold_seconds=resync_threshold,
+        now_fn=now_fn, sim=sim)
+
+    ok = True
+    for step in range(0, 55):
+        holder["t"] += 60.0                  # advance one in-half match minute
+        abs_minute = half_min + int(holder["t"] // 60)   # absolute match minute
+        if abs_minute >= ft_minute:          # full-time snapshot arrives on the clock
+            feed.record(_relay_snapshot(ft_snap["stats"], abs_minute, "FT"),
+                        minute=abs_minute)
+        screen._auto_pick()                  # lock all dials + pick an active player
+        screen.update(0.0)
+        if finished["done"]:
+            break
+
+    expected = list(range(editing_start, et_window + 1))
+    in_order = locks == sorted(locks)
+    locked_expected = locks == expected
+    if not (finished["done"] and in_order and locked_expected):
+        ok = False
+
+    print(("OK" if locked_expected else "FAIL"),
+          "live 2H smoke: locked windows =", locks, "(expected", expected, ")")
+    print(("OK" if in_order else "FAIL"), "live 2H smoke: windows locked in order")
+    print(("OK" if finished["done"] else "FAIL"),
+          "live 2H smoke: reached final screen (on_finished fired)")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     rc_offline = main()
     rc_live = live_smoke()
-    raise SystemExit(rc_offline or rc_live)
+    rc_live_2h = live_smoke_2h()
+    raise SystemExit(rc_offline or rc_live or rc_live_2h)
