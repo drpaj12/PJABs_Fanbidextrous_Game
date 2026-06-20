@@ -85,3 +85,15 @@ def test_team_names_from_fixture():
     feed = LiveFeed(_snap("1H", 10, 1, 1, 0, 0, 0))
     assert feed.home_team() == "Canada"
     assert feed.away_team() == "X"
+
+
+def test_kickoff_iso_and_status_short_from_fixture():
+    snap = _snap("NS", 0, 0, 0, 0, 0, 0, lineups=False)
+    snap["fixture"]["response"][0]["fixture"]["date"] = "2026-06-20T18:00:00+00:00"
+    feed = LiveFeed(snap)
+    assert feed.kickoff_iso() == "2026-06-20T18:00:00+00:00"
+    assert feed.status_short() == "NS"
+
+
+def test_kickoff_iso_none_until_seen():
+    assert LiveFeed().kickoff_iso() is None

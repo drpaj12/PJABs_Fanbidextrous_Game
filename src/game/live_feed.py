@@ -23,6 +23,7 @@ class LiveFeed:
         self._elapsed: int = 0
         self._home_team: str = ""
         self._away_team: str = ""
+        self._kickoff_iso: Optional[str] = None
         if snapshot is not None:
             self.record(snapshot)
 
@@ -32,9 +33,12 @@ class LiveFeed:
         current elapsed minute (or `minute` if given). Empty lineups are ignored so a
         pre-match poll does not wipe a previously seen lineup."""
         fixture = self._first(snapshot.get("fixture"))
-        status = fixture.get("fixture", {}).get("status", {})
+        fixture_block = fixture.get("fixture", {})
+        status = fixture_block.get("status", {})
         if status.get("short"):
             self._status_short = status["short"]
+        if fixture_block.get("date"):
+            self._kickoff_iso = fixture_block["date"]
         if status.get("elapsed") is not None:
             self._elapsed = int(status["elapsed"])
         teams = fixture.get("teams") or {}
@@ -106,3 +110,12 @@ class LiveFeed:
     def away_team(self) -> str:
         """Away team name from the fixture payload (empty until first poll)."""
         return self._away_team
+
+    def kickoff_iso(self) -> Optional[str]:
+        """Scheduled kickoff timestamp (ISO 8601) from the fixture payload, or None until
+        a poll has returned one. Drives the pre-game countdown."""
+        return self._kickoff_iso
+
+    def status_short(self) -> str:
+        """Raw API-Football status code (NS, 1H, HT, FT, ...) before engine mapping."""
+        return self._status_short

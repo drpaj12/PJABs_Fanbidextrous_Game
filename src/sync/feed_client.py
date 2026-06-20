@@ -17,6 +17,11 @@ class FeedClient:
         self._t = transport or default_transport()
         self._is_lead = is_lead
 
+    @property
+    def is_lead(self) -> bool:
+        """True if this client triggers upstream fetches (the others read the cache)."""
+        return self._is_lead
+
     async def get_feed(self, fixture_id: int) -> dict[str, Any]:
         url = f"{self._base}{self._path}?fixture={fixture_id}"
         if self._is_lead:

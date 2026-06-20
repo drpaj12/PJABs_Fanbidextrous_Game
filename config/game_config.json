@@ -48,8 +48,9 @@
     "max_stars": 5
   },
   "feed": {
-    "_comment": "poll_seconds 300 = one 5-minute poll per window. Only the lead client triggers upstream fetches (see relay cache_ttl + client.lead_username), so a full half is ~10 refreshes x 2 calls + 1 lineups = ~21 queries/game; 3 games < 80/day.",
+    "_comment": "poll_seconds 300 = one 5-minute poll per window. Only the lead client triggers upstream fetches (see relay cache_ttl + client.lead_username), so a full half is ~10 refreshes x 2 calls + 1 lineups = ~21 queries/game; 3 games < 80/day. follower_poll_delay_seconds offsets non-lead polls so the lead's fresh write lands in the cache before followers read it.",
     "poll_seconds": 300,
+    "follower_poll_delay_seconds": 15,
     "halftime_status": "halftime"
   },
   "client": {
@@ -68,9 +69,11 @@
     "feed_path": "/feed_cache.php"
   },
   "live": {
-    "_comment": "fixture_id is the single-game default for --live; fixtures is the pick list (World Cup 2026-06-20). Free tier = 100 req/day; relay caches per fixture, fetches lineups once.",
+    "_comment": "fixture_id is the single-game default for --live; fixtures is the pick list (World Cup 2026-06-20). Free tier = 100 req/day; relay caches per fixture, fetches lineups once. warn_minutes_before: show a 'too early, come back later' notice when kickoff is further off than this. start_minutes_before: the lead does not poll the API until kickoff is within this many minutes (saves quota); a kickoff countdown shows meanwhile.",
     "fixture_id": 1539007,
     "competition_label": "FIFA World Cup 2026",
+    "warn_minutes_before": 60,
+    "start_minutes_before": 15,
     "fixtures": [
       {"id": 1539007, "label": "Netherlands v Sweden"},
       {"id": 1489393, "label": "Germany v Ivory Coast"},
