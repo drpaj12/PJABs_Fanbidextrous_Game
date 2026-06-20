@@ -18,6 +18,16 @@ _REQUIRED_KEYS = ("id", "competition", "home", "away", "round",
 _DAY = 24 * 3600
 
 
+def _derive_abbr(name: str) -> str:
+    """Fallback 3-letter code from a team name: the uppercased first three letters of its
+    longest word (ties resolve to the first). 'Netherlands'->'NET', 'Ivory Coast'->'IVO'."""
+    words = [w for w in name.split() if w]
+    if not words:
+        return name[:3].upper()
+    longest = max(words, key=len)
+    return longest[:3].upper()
+
+
 def _parse_epoch(iso: Any) -> Optional[float]:
     """Parse an ISO 8601 UTC timestamp ('...Z' or '...+00:00') to epoch seconds, or None.
 
@@ -46,11 +56,22 @@ class ScheduledGame:
     round: str
     kickoff_utc: str
     kickoff_local: str
+    home_abbr: str = ""
+    away_abbr: str = ""
 
     def title(self) -> str:
         """'Home v Away' when both teams are known, else the round descriptor."""
         if self.home and self.away:
             return f"{self.home} v {self.away}"
+        return self.round
+
+    def short_title(self) -> str:
+        """Compact 'NED v SWE' so the title fits the card. Uses the curated abbr fields,
+        falls back to a derived 3-letter code per team, then to the round descriptor."""
+        if self.home and self.away:
+            home = self.home_abbr or _derive_abbr(self.home)
+            away = self.away_abbr or _derive_abbr(self.away)
+            return f"{home} v {away}"
         return self.round
 
     def kickoff_epoch(self) -> Optional[float]:
@@ -78,6 +99,8 @@ def load_schedule(raw: dict) -> list[ScheduledGame]:
                 round=str(rec["round"]),
                 kickoff_utc=str(rec["kickoff_utc"]),
                 kickoff_local=str(rec["kickoff_local"]),
+                home_abbr=str(rec.get("home_abbr", "")),
+                away_abbr=str(rec.get("away_abbr", "")),
             )
         except (TypeError, ValueError):
             continue

@@ -311,19 +311,23 @@ class LiveFlow(Flow):
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
-               is_lead: bool = False, username: str = "") -> None:
+               is_lead: bool = False, username: str = "", kickoff_utc: str = "") -> None:
     """Live single-player half. Park on a waiting screen until the API publishes the
     starting XI, then size the half from the live match clock and run the draft + windows.
     Only the lead client (is_lead) spends API-Football quota; followers read the cache.
 
     Warm cache: on entry the last saved relay snapshot for this user+fixture is replayed
     into the feed so lineups/score/clock show instantly (no API call); each successful live
-    poll persists the fresh snapshot back so the next session is warm too."""
+    poll persists the fresh snapshot back so the next session is warm too.
+
+    kickoff_utc (from the picked schedule game) seeds the pre-game countdown for any game,
+    not just those listed in live.fixtures; a real poll's fixture.date still overrides it."""
     feed = LiveFeed()
     for fx in (_LIVE.get("fixtures") or []):
         if fx.get("id") == fixture_id and fx.get("kickoff"):
             feed.seed_kickoff(fx["kickoff"])
             break
+    feed.seed_kickoff(kickoff_utc)   # picked-game kickoff wins (seed_kickoff no-ops if "")
 
     store = LocalStore()
     key = cachep.cache_key(username, fixture_id)
@@ -383,7 +387,7 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
     app.set_screen(LiveWaitScreen(app, feed, feed_client, fixture_id,
                                   target_minute=None, on_ready=begin,
                                   poll_seconds=_POLL_SECONDS, sim=sim,
-                                  wait_for_lineups=True))
+                                  wait_for_lineups=True, on_back=to_picker))
 
 
 def start_live_select(app: "App", sim_mode: bool = False,
@@ -403,8 +407,9 @@ def start_live_select(app: "App", sim_mode: bool = False,
     games = load_schedule(raw)
 
     def picked(fixture_id: int) -> None:
+        game = next((g for g in games if g.id == fixture_id), None)
         start_live(app, fixture_id, sim_mode=sim_mode, is_lead=is_lead,
-                   username=username)
+                   username=username, kickoff_utc=(game.kickoff_utc if game else ""))
 
     app.set_screen(FixtureSelectScreen(app, games, picked, sched_cfg, sim))
 

@@ -10,6 +10,7 @@ import pygame
 from src.ui.screens.base import Screen
 from src.ui.widgets import athlete_card, Button, PlayerDetail, ScrollButtons, font
 from src.game.athlete import DraftedAthlete
+from src.game.ability_text import card_tagline
 from src.ui.sim import SimMode
 from src.utils.constants import CONFIG, LAYOUT
 
@@ -82,9 +83,7 @@ class DraftScreen(Screen):
         if self.zoom_idx is not None:
             if self.detail.select_btn.hit(event.pos):
                 self._confirm(self.pool[self.zoom_idx].athlete_id)
-                self.zoom_idx = None
-            elif not self.detail.rect.collidepoint(event.pos):
-                self.zoom_idx = None
+            self.zoom_idx = None     # any tap (except a Select, handled above) closes
             return
         if self.scroll_btns.contains(event.pos):
             self.scroll = self.scroll_btns.handle(event, self.scroll, self._max_scroll())
@@ -119,7 +118,7 @@ class DraftScreen(Screen):
             if r.bottom < vp.top or r.top > vp.bottom:
                 continue
             athlete_card(surface, r, cf, ath.name, ath.archetype, ath.stars,
-                         ath.athlete_id in self.selected)
+                         ath.athlete_id in self.selected, tagline=card_tagline(ath))
         surface.set_clip(prev)
         if self.zoom_idx is None and self._max_scroll() > 0:
             self.scroll_btns.draw(surface, self.scroll, self._max_scroll())

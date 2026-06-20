@@ -37,5 +37,27 @@
     "Defender":   ["CB", "FB", "WB"],
     "Midfielder": ["DM", "CM", "AM"],
     "Attacker":   ["WG", "SS", "ST"]
+  },
+  "_blurbs_comment": "Plain ASCII one-line role reads shown in the player detail panel. Edit freely.",
+  "blurbs": {
+    "GK": "Shot-stopper - blocks a shot for you, costs you next window",
+    "CB": "Rock at the back - slashes concede risk this window",
+    "FB": "Steady fullback - trims concede risk this window",
+    "WB": "Marauding wing-back - trims concede risk, light cost next",
+    "DM": "Anchor - halves concede risk this window",
+    "CM": "Engine room - lifts success credit now and next",
+    "AM": "Playmaker - doubles success credit, opens you up next",
+    "WG": "Winger - sharper shooting now, exposed next",
+    "SS": "Second striker - big success boost, exposed next",
+    "ST": "Out-and-out striker - deadly conversion, exposed next"
+  },
+  "_phrasing_comment": "Templates per effect kind. {signed}=+/-1.0, {mult}=3.2, {pct}=+32%.",
+  "effect_phrasing": {
+    "negate_concede_shot": "blocks a shot against you",
+    "success_credit_add":  "{signed} success credit",
+    "success_credit_mult": "x{mult} success credit",
+    "concede_credit_add":  "{signed} concede risk",
+    "concede_credit_mult": "x{mult} concede risk",
+    "conversion_add":      "{pct} shot conversion"
   }
 }

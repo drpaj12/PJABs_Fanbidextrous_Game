@@ -4,7 +4,7 @@ rolling-window filter. No pygame; deterministic via explicit `now` epochs."""
 from datetime import datetime, timedelta, timezone
 
 from src.game.schedule import (ScheduledGame, load_schedule, game_status,
-                               status_label, is_playable, visible_games)
+                               status_label, is_playable, visible_games, _derive_abbr)
 
 _BASE = datetime(2026, 6, 20, 12, 0, 0, tzinfo=timezone.utc)
 NOW = _BASE.timestamp()
@@ -31,6 +31,38 @@ def test_title_uses_teams_when_known() -> None:
 def test_title_falls_back_to_round_when_teams_blank() -> None:
     assert _game(home="", away="", round="Round of 16 - Match 50").title() == \
         "Round of 16 - Match 50"
+
+
+def test_short_title_uses_abbr_when_present() -> None:
+    g = _game(home="Netherlands", away="Sweden", home_abbr="NED", away_abbr="SWE")
+    assert g.short_title() == "NED v SWE"
+
+
+def test_short_title_derives_when_abbr_missing() -> None:
+    g = _game(home="Netherlands", away="Ivory Coast")
+    assert g.short_title() == "NET v IVO"
+
+
+def test_short_title_falls_back_to_round_when_teams_blank() -> None:
+    g = _game(home="", away="", round="Round of 16 - Match 50")
+    assert g.short_title() == "Round of 16 - Match 50"
+
+
+def test_derive_abbr_uses_longest_word() -> None:
+    assert _derive_abbr("Netherlands") == "NET"
+    assert _derive_abbr("Ivory Coast") == "IVO"     # both 5 chars -> first
+    assert _derive_abbr("LA Galaxy") == "GAL"       # 'Galaxy' is longest
+    assert _derive_abbr("") == ""
+
+
+def test_load_schedule_reads_optional_abbr() -> None:
+    raw = {"games": [
+        {"id": 1, "competition": "WC", "home": "A", "away": "B", "round": "G",
+         "home_abbr": "AAA", "away_abbr": "BBB",
+         "kickoff_utc": "2026-06-20T17:00:00Z", "kickoff_local": "1 PM"},
+    ]}
+    g = load_schedule(raw)[0]
+    assert (g.home_abbr, g.away_abbr) == ("AAA", "BBB")
 
 
 def test_kickoff_epoch_parses_z_and_offset_equally() -> None:

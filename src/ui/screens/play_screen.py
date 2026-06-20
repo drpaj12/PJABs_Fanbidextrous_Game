@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 import pygame
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, ScrollButtons, athlete_card, font
+from src.ui.widgets import Button, PlayerDetail, ScrollButtons, athlete_card, font
 from src.game.prediction import Prediction
 from src.game.athlete import DraftedAthlete
 from src.game.window_report import WindowReport
@@ -54,9 +54,11 @@ class PlayScreen(Screen):
         self.feedback = ""
         self.remaining = float(CONFIG["game"]["window_seconds"])
         self.scroll = 0
+        self.zoom_idx: int | None = None  # tapped player's detail panel, or None
         self._y = 0  # render cursor for the results panel (set each draw)
         sw, sh = app.screen.get_size()
         m = LAYOUT.i("screen_margin", 20)
+        self.detail = PlayerDetail(pygame.Rect(m, 120, sw - 2 * m, sh - 240))
         self.lock_btn = Button(
             pygame.Rect(m, sh - LAYOUT.i("play_lock_btn_h", 56) - 12,
                         sw - 2 * m, LAYOUT.i("play_lock_btn_h", 56)),
@@ -143,6 +145,13 @@ class PlayScreen(Screen):
             self._auto_pick()
             self._submit()
             return
+        if self.zoom_idx is not None:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.detail.select_btn.hit(event.pos):
+                    self.active_id = self.available[self.zoom_idx].athlete_id
+                    self.feedback = ""
+                self.zoom_idx = None     # any tap (except a Select, above) closes
+            return
         if event.type == pygame.MOUSEWHEEL:
             if self._viewport().collidepoint(pygame.mouse.get_pos()):
                 self.scroll = max(0, min(self._max_scroll(), self.scroll - event.y * 40))
@@ -164,8 +173,7 @@ class PlayScreen(Screen):
                 return
         for j, ath in enumerate(self.available):
             if self._player_rect(j).collidepoint(event.pos):
-                self.active_id = ath.athlete_id
-                self.feedback = ""
+                self.zoom_idx = j     # open the detail panel; Select there sets active
                 return
 
     def _tap_stat(self, code: str, x: int, r: pygame.Rect) -> None:
@@ -231,9 +239,14 @@ class PlayScreen(Screen):
         self._draw_report(surface)
         surface.set_clip(prev)
 
-        if self._max_scroll() > 0:
+        if self.zoom_idx is None and self._max_scroll() > 0:
             self.scroll_btns.draw(surface, self.scroll, self._max_scroll())
         self.lock_btn.draw(surface, font(LAYOUT.i("play_stat_size", 20)))
+        if self.zoom_idx is not None:
+            ath = self.available[self.zoom_idx]
+            self.detail.select_btn.label = (
+                "Picked" if ath.athlete_id == self.active_id else "Pick player")
+            self.detail.draw(surface, ath)
 
     def _draw_captions(self, surface: pygame.Surface) -> None:
         cf = font(LAYOUT.i("play_section_size", 17))

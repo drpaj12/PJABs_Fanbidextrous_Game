@@ -152,7 +152,7 @@ class FixtureSelectScreen(Screen):
         title_col = _C["white"] if playable else _C["text_dim"]
         nmax = LAYOUT.i("fixsel_card_title_max", 26)
         nf = font(LAYOUT.i("fixsel_card_title_size", 22))
-        surface.blit(nf.render(game.title()[:nmax], True, title_col),
+        surface.blit(nf.render(game.short_title()[:nmax], True, title_col),
                      (rect.x + 12, rect.y + 10))
         sf = font(LAYOUT.i("fixsel_card_sub_size", 17))
         surface.blit(sf.render(game.kickoff_local, True, _C["text_dim"]),

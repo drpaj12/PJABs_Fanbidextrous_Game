@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 import pygame
 from src.ui.screens.base import Screen
 from src.ui.sim import SimMode
-from src.ui.widgets import font
+from src.ui.widgets import Button, font
 from src.game.live_feed import LiveFeed
 from src.game.kickoff import (seconds_to_kickoff, kickoff_phase, format_minutes,
                               PHASE_TOO_EARLY, PHASE_SOON, PHASE_ACTIVE)
@@ -55,7 +55,8 @@ class LiveWaitScreen(Screen):
                  on_ready: Callable[[], None], poll_seconds: float,
                  sim: Optional[SimMode] = None,
                  wait_for_lineups: bool = False,
-                 wait_for_second_half: bool = False) -> None:
+                 wait_for_second_half: bool = False,
+                 on_back: Optional[Callable[[], None]] = None) -> None:
         super().__init__(app)
         self.feed = feed
         self.feed_client = feed_client
@@ -66,6 +67,12 @@ class LiveWaitScreen(Screen):
         self.sim = sim
         self.wait_for_lineups = wait_for_lineups
         self.wait_for_second_half = wait_for_second_half
+        self.on_back = on_back
+        m = LAYOUT.i("screen_margin", 20)
+        self.back_btn = Button(
+            pygame.Rect(LAYOUT.i("livewait_back_x", m), LAYOUT.i("livewait_back_y", m),
+                        LAYOUT.i("livewait_back_w", 96), LAYOUT.i("livewait_back_h", 44)),
+            "< Back") if on_back else None
         # Lead polls immediately; followers wait out the delay so the lead writes first.
         delay = 0.0 if feed_client.is_lead else _FOLLOWER_DELAY
         self._since_poll = poll_seconds - delay
@@ -117,8 +124,13 @@ class LiveWaitScreen(Screen):
     # -- screen -------------------------------------------------------------
     def handle(self, event: pygame.event.Event) -> None:
         # SIM only: tap to skip the wall-clock wait (no real polling on desktop dev).
+        # Checked before the back button so headless smokes always advance, never loop.
         if self.sim and self.sim.enabled and event.type == pygame.MOUSEBUTTONDOWN:
             self._finish()
+            return
+        if (event.type == pygame.MOUSEBUTTONDOWN and self.back_btn
+                and self.back_btn.hit(event.pos) and self.on_back):
+            self.on_back()
 
     def _finish(self) -> None:
         if not self._fired:
@@ -157,6 +169,8 @@ class LiveWaitScreen(Screen):
 
     def draw(self, surface: pygame.Surface) -> None:
         sw = surface.get_width()
+        if self.back_btn:
+            self.back_btn.draw(surface, font(LAYOUT.i("livewait_back_size", 20)))
         self._draw_centered(surface, f"LIVE  -  {_COMP}", "livewait_header_size", 22,
                             "livewait_header_y", 150, _C["accent"])
 

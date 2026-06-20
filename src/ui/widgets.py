@@ -2,6 +2,7 @@
 """Mobile-friendly pygame widgets: large touch targets. All pygame lives in src/ui/."""
 import math
 import pygame
+from src.game import ability_text
 from src.utils.constants import CONFIG, LAYOUT
 
 _C = CONFIG["colors"]
@@ -119,16 +120,39 @@ class MeterBar:
                                  (cx + dx, cy + dy), 2)
 
 
+def wrap_text(text: str, f: pygame.font.Font, max_width: int) -> list[str]:
+    """Greedy word-wrap `text` to lines that each render within `max_width` pixels."""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if current and f.size(trial)[0] > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = trial
+    if current:
+        lines.append(current)
+    return lines
+
+
 def athlete_card(surface: pygame.Surface, rect: pygame.Rect,
-                 font: pygame.font.Font, name: str, archetype: str,
-                 stars: int, selected: bool) -> None:
+                 name_font: pygame.font.Font, name: str, archetype: str,
+                 stars: int, selected: bool, tagline: str = "") -> None:
     bg = _C["accent"] if selected else _C["surface"]
     radius = LAYOUT.i("ui_corner_radius", 10)
     pygame.draw.rect(surface, bg, rect, border_radius=radius)
     pygame.draw.rect(surface, _C["border"], rect, width=2, border_radius=radius)
-    surface.blit(font.render(name[:16], True, _C["white"]), (rect.x + 8, rect.y + 6))
-    surface.blit(font.render(f"{archetype}  {'*' * stars}", True, _C["text_dim"]),
+    surface.blit(name_font.render(name[:16], True, _C["white"]), (rect.x + 8, rect.y + 6))
+    surface.blit(name_font.render(f"{archetype}  {'*' * stars}", True, _C["text_dim"]),
                  (rect.x + 8, rect.y + 30))
+    if tagline:
+        tf = font(LAYOUT.i("card_tagline_size", 15))
+        cap = LAYOUT.i("card_tagline_max", 34)
+        text = tagline if len(tagline) <= cap else tagline[:cap - 3] + "..."
+        surface.blit(tf.render(text, True, _C["accent"]),
+                     (rect.x + 8, rect.y + 30 + LAYOUT.i("card_tagline_dy", 22)))
 
 
 class Popup:
@@ -205,13 +229,33 @@ class PlayerDetail:
         pygame.draw.rect(surface, _C["accent"], self.rect, width=2, border_radius=12)
         nf = font(LAYOUT.i("draft_detail_size", 22) + 6)
         bf = font(LAYOUT.i("draft_detail_size", 22))
-        x, y = self.rect.x + 16, self.rect.y + 16
+        rf = font(LAYOUT.i("draft_detail_role_size", 18))
+        gap = LAYOUT.i("draft_detail_line_gap", 32)
+        x = self.rect.x + 16
+        max_w = self.rect.width - 32
+        y = self.rect.y + 16
         surface.blit(nf.render(athlete.name, True, _C["white"]), (x, y))
-        rows = [f"Position: {athlete.broad_position}",
-                f"Team: {athlete.team}",
-                f"Archetype: {athlete.archetype}",
-                f"Rating: {'*' * athlete.stars}",
-                f"Jersey: {athlete.jersey}"]
-        for i, r in enumerate(rows):
-            surface.blit(bf.render(r, True, _C["text"]), (x, y + 44 + i * 34))
+        y += gap + 8
+
+        # Role read (wrapped, accent) -- the one-line 'why this player is good'.
+        for line in wrap_text(ability_text.role_summary(athlete), rf, max_w):
+            surface.blit(rf.render(line, True, _C["accent"]), (x, y))
+            y += LAYOUT.i("draft_detail_role_gap", 26)
+        y += 6
+
+        # Compact identity block.
+        for r in (f"Position: {athlete.broad_position}",
+                  f"Team: {athlete.team}",
+                  f"Jersey: {athlete.jersey}"):
+            surface.blit(bf.render(r, True, _C["text"]), (x, y))
+            y += gap
+        y += 6
+
+        # Abilities (this/next window effects, conversion %, rating).
+        surface.blit(rf.render("Abilities", True, _C["text_dim"]), (x, y))
+        y += LAYOUT.i("draft_detail_role_gap", 26)
+        for line in ability_text.effect_lines(athlete):
+            surface.blit(bf.render(line, True, _C["text"]), (x, y))
+            y += gap
+
         self.select_btn.draw(surface, bf)
