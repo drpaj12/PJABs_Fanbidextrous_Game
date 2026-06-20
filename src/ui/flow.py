@@ -73,17 +73,17 @@ def _demo_script() -> dict:
     return {
         "status_by_minute": [(0, "live"), (48, "halftime")],
         "snapshots": [
-            {"minute": 0,  "stats": {"corner_kicks": 0,  "shots_on_goal": 0, "goalkeeper_saves": 0, "goals": 0, "cards": 0}},
-            {"minute": 5,  "stats": {"corner_kicks": 1,  "shots_on_goal": 1, "goalkeeper_saves": 0, "goals": 0, "cards": 0}},
-            {"minute": 10, "stats": {"corner_kicks": 2,  "shots_on_goal": 2, "goalkeeper_saves": 1, "goals": 0, "cards": 0}},
-            {"minute": 15, "stats": {"corner_kicks": 3,  "shots_on_goal": 3, "goalkeeper_saves": 1, "goals": 0, "cards": 1}},
-            {"minute": 20, "stats": {"corner_kicks": 4,  "shots_on_goal": 4, "goalkeeper_saves": 2, "goals": 1, "cards": 1}},
-            {"minute": 25, "stats": {"corner_kicks": 5,  "shots_on_goal": 5, "goalkeeper_saves": 2, "goals": 1, "cards": 1}},
-            {"minute": 30, "stats": {"corner_kicks": 6,  "shots_on_goal": 6, "goalkeeper_saves": 3, "goals": 1, "cards": 1}},
-            {"minute": 35, "stats": {"corner_kicks": 7,  "shots_on_goal": 7, "goalkeeper_saves": 3, "goals": 1, "cards": 2}},
-            {"minute": 40, "stats": {"corner_kicks": 8,  "shots_on_goal": 8, "goalkeeper_saves": 4, "goals": 2, "cards": 2}},
-            {"minute": 45, "stats": {"corner_kicks": 9,  "shots_on_goal": 9, "goalkeeper_saves": 4, "goals": 2, "cards": 2}},
-            {"minute": 48, "stats": {"corner_kicks": 10, "shots_on_goal": 9, "goalkeeper_saves": 5, "goals": 2, "cards": 2}},
+            {"minute": 0,  "stats": {"corner_kicks": 0,  "shots_on_goal": 0, "fouls": 0,  "goals": 0, "cards": 0}},
+            {"minute": 5,  "stats": {"corner_kicks": 1,  "shots_on_goal": 1, "fouls": 2,  "goals": 0, "cards": 0}},
+            {"minute": 10, "stats": {"corner_kicks": 2,  "shots_on_goal": 2, "fouls": 4,  "goals": 0, "cards": 0}},
+            {"minute": 15, "stats": {"corner_kicks": 3,  "shots_on_goal": 3, "fouls": 5,  "goals": 0, "cards": 1}},
+            {"minute": 20, "stats": {"corner_kicks": 4,  "shots_on_goal": 4, "fouls": 7,  "goals": 1, "cards": 1}},
+            {"minute": 25, "stats": {"corner_kicks": 5,  "shots_on_goal": 5, "fouls": 9,  "goals": 1, "cards": 1}},
+            {"minute": 30, "stats": {"corner_kicks": 6,  "shots_on_goal": 6, "fouls": 11, "goals": 1, "cards": 1}},
+            {"minute": 35, "stats": {"corner_kicks": 7,  "shots_on_goal": 7, "fouls": 13, "goals": 1, "cards": 2}},
+            {"minute": 40, "stats": {"corner_kicks": 8,  "shots_on_goal": 8, "fouls": 15, "goals": 2, "cards": 2}},
+            {"minute": 45, "stats": {"corner_kicks": 9,  "shots_on_goal": 9, "fouls": 17, "goals": 2, "cards": 2}},
+            {"minute": 48, "stats": {"corner_kicks": 10, "shots_on_goal": 9, "fouls": 19, "goals": 2, "cards": 2}},
         ],
     }
 

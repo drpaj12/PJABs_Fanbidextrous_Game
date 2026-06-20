@@ -50,8 +50,8 @@ def test_missing_actual_defaults_to_zero():
 
 
 def test_label_falls_back_to_code():
-    r = _report([Prediction("save", 2)], {"save": 2})
-    assert r.results[0].label == "save"
+    r = _report([Prediction("foul", 2)], {"foul": 2})
+    assert r.results[0].label == "foul"
 
 
 def test_meter_percentages_clamp_and_round():

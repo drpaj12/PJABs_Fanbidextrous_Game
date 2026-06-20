@@ -19,7 +19,7 @@ def test_exact_predictions_fill_success_meter_and_can_fire():
                           rng=random.Random(7))
     # Three exact predictions = 3 * 2 = 6 success credit = threshold -> fires once.
     preds = [Prediction("corner", 3), Prediction("shot", 2)]
-    actuals = {"corner": 3, "shot": 2, "goal": 0, "card": 0, "save": 0}
+    actuals = {"corner": 3, "shot": 2, "goal": 0, "card": 0, "foul": 0}
     res: WindowResolution = session.resolve_window(
         window=1, predictions=preds, active_id="a0", use_power=False, actuals=actuals)
     # 2 exact preds -> 4 success credit, below threshold 6, no fire yet.
@@ -31,7 +31,7 @@ def test_big_miss_fills_concede_meter():
     session = GameSession(slot=0, roster=Roster(_hand()), pool=_hand(),
                           rng=random.Random(7))
     preds = [Prediction("corner", 0), Prediction("shot", 0)]
-    actuals = {"corner": 9, "shot": 9, "goal": 0, "card": 0, "save": 0}
+    actuals = {"corner": 9, "shot": 9, "goal": 0, "card": 0, "foul": 0}
     session.resolve_window(window=1, predictions=preds, active_id="a1",
                            use_power=False, actuals=actuals)
     # 2 big misses -> 2 * 2 = 4 concede credit.
