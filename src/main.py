@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.ui.app import App
 from src.ui import flow
-from src.utils.constants import CONFIG
 
 
 async def main() -> None:
@@ -28,12 +27,11 @@ async def main() -> None:
         i = sys.argv.index("--live")
         arg = sys.argv[i + 1] if i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit() \
             else None
-        fixture_id = int(arg) if arg is not None else CONFIG["live"]["fixture_id"]
-        if fixture_id is None:
-            print("FAIL: no live fixture id. Pass one (--live 12345) or set "
-                  "config live.fixture_id once a valid API key is in place.")
-            return
-        flow.start_live(app, int(fixture_id), sim_mode="--simlive" in sys.argv)
+        if arg is not None:
+            flow.start_live(app, int(arg), sim_mode="--simlive" in sys.argv)
+        else:
+            # No id given -> show the match picker (config live.fixtures).
+            flow.start_live_select(app, sim_mode="--simlive" in sys.argv)
     elif "--simdemo" in sys.argv:
         flow.start(app, sim_mode=True)
     else:

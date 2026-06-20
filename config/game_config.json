@@ -63,9 +63,14 @@
     "feed_path": "/feed_cache.php"
   },
   "live": {
-    "_comment": "fixture_id resolved from API-Football once a valid key is in place",
-    "fixture_id": null,
-    "competition_label": "FIFA World Cup 2026"
+    "_comment": "fixture_id is the single-game default for --live; fixtures is the pick list (World Cup 2026-06-20). Free tier = 100 req/day; relay caches per fixture, fetches lineups once.",
+    "fixture_id": 1539007,
+    "competition_label": "FIFA World Cup 2026",
+    "fixtures": [
+      {"id": 1539007, "label": "Netherlands v Sweden"},
+      {"id": 1489393, "label": "Germany v Ivory Coast"},
+      {"id": 1539006, "label": "Turkiye v Paraguay"}
+    ]
   },
   "assets": {
     "data_dir": "assets/data",

@@ -31,6 +31,7 @@ from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
+from src.ui.screens.fixture_select_screen import FixtureSelectScreen
 from src.utils.constants import CONFIG, load_data
 
 if TYPE_CHECKING:
@@ -295,6 +296,20 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False) -> None:
                                   target_minute=None, on_ready=begin,
                                   poll_seconds=_POLL_SECONDS, sim=sim,
                                   wait_for_lineups=True))
+
+
+def start_live_select(app: "App", sim_mode: bool = False) -> None:
+    """Show the live-match picker (config live.fixtures), then play the chosen one live.
+    This is the web/no-argument entry point for match day."""
+    sim = SimMode(sim_mode)
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+    fixtures = _LIVE.get("fixtures") or []
+
+    def picked(fixture_id: int) -> None:
+        start_live(app, fixture_id, sim_mode=sim_mode)
+
+    app.set_screen(FixtureSelectScreen(app, fixtures, picked, sim))
 
 
 def start_simulation(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:
