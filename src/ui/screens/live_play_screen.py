@@ -71,7 +71,8 @@ class LivePlayScreen(Screen):
                  on_lock: Callable[[int, list[Prediction], str, bool], WindowReport],
                  on_finished: Callable[[], None], poll_seconds: float,
                  available: list[DraftedAthlete], now_fn: Callable[[], float] = time.time,
-                 sim: Optional[SimMode] = None) -> None:
+                 sim: Optional[SimMode] = None,
+                 on_snapshot: Optional[Callable[[dict], None]] = None) -> None:
         super().__init__(app)
         self.feed = feed
         self.feed_client = feed_client
@@ -84,6 +85,7 @@ class LivePlayScreen(Screen):
         self.available = available
         self.now_fn = now_fn
         self.sim = sim
+        self.on_snapshot = on_snapshot
 
         # -- editor state (the window the player is currently filling in) --
         self.edit_window = editing_window_start
@@ -140,6 +142,8 @@ class LivePlayScreen(Screen):
         try:
             snapshot = await self.feed_client.get_feed(self.fixture_id)
             self.feed.record(snapshot)
+            if self.on_snapshot is not None:
+                self.on_snapshot(snapshot)
             self._error = ""
         except Exception as exc:                       # network/parse: keep retrying
             self._error = f"reconnecting ({type(exc).__name__})"

@@ -8,6 +8,7 @@ a half-time status. The engine is untouched; meter before/after values are captu
 around resolve_window to drive the cinematic.
 """
 import random
+import time
 from typing import TYPE_CHECKING, Optional
 from src.game.mock_feed import MockFeed
 from src.game.replay_feed import ReplayFeed
@@ -20,8 +21,12 @@ from src.game.session import GameSession
 from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
 from src.game.half_clock import HalfClock
+from src.game.match_clock import MatchClock
+from src.game.kickoff import seconds_to_kickoff
 from src.game.window_report import WindowReport, build_window_report
+from src.game import feed_cache_policy as cachep
 from src.sync.feed_client import FeedClient
+from src.sync.local_store import LocalStore
 from src.ui.sim import SimMode
 from src.ui.screens.splash import SplashScreen
 from src.ui.screens.room import RoomScreen
@@ -31,6 +36,7 @@ from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
+from src.ui.screens.live_play_screen import LivePlayScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
 from src.ui.screens.launcher_screen import LauncherScreen
 from src.ui.screens.username_screen import UsernameScreen
@@ -211,19 +217,20 @@ class Flow:
 
 
 class LiveFlow(Flow):
-    """A live half: drives windows from a live_plan's remaining-window list, and waits on
-    the wall clock (polling the relay) between locking predictions and resolving each
-    window. Reuses Flow's splash -> room -> pre-game -> draft and the resolve/cinematic
-    machinery; only the window iteration and the "play it out, then resolve" gap differ."""
+    """A live half hosted by the single unified LivePlayScreen. The screen runs a wall-clock
+    MatchClock for the whole half and calls back into the flow to resolve each window as its
+    boundary passes (`_on_lock`) and to reach the FinalScreen when the half ends
+    (`_to_final`). Reuses Flow's splash -> room -> pre-game -> draft; only the play phase
+    differs (one always-running screen instead of the predict/wait/cinematic cycle)."""
 
     def __init__(self, app: "App", feed: LiveFeed, feed_client: FeedClient,
                  fixture_id: int, pool: list[DraftedAthlete], plan: LivePlan,
-                 sim: SimMode) -> None:
+                 sim: SimMode, on_snapshot=None) -> None:
         super().__init__(app, feed, pool, sim)
         self.feed_client = feed_client
         self.fixture_id = fixture_id
         self._scored = plan.scored_windows
-        self._idx = 0
+        self.on_snapshot = on_snapshot
 
     def _fixture(self) -> dict:
         return {
@@ -234,58 +241,87 @@ class LiveFlow(Flow):
         }
 
     def _after_draft(self, selected: list[str]) -> None:
-        self.window = self._scored[self._idx]
-        super()._after_draft(selected)
+        # Build the session from the drafted hand (as Flow does), then hand the whole half
+        # to the unified live screen instead of stepping window-by-window.
+        hand = [a for a in self.pool if a.athlete_id in selected]
+        self.session = GameSession(slot=0, roster=Roster(hand), pool=self.pool,
+                                   rng=random.Random(_RNG_SEED))
+        now_now = time.time()
+        secs = seconds_to_kickoff(self.feed.kickoff_iso(), now_now)
+        kickoff_epoch = now_now + secs if secs is not None else now_now
+        match_clock = MatchClock(kickoff_epoch, self.clock)
+        editing_start = match_clock.editing_window(now_now)
+        available = self.session.roster.available()
+        self.app.set_screen(LivePlayScreen(
+            app=self.app, feed=self.feed, feed_client=self.feed_client,
+            match_clock=match_clock, fixture_id=self.fixture_id,
+            editing_window_start=editing_start, on_lock=self._on_lock,
+            on_finished=self._to_final, poll_seconds=_POLL_SECONDS,
+            available=available, sim=self.sim, on_snapshot=self.on_snapshot))
 
-    def _window_actuals(self) -> dict[str, int]:
-        # As Flow, but a live Extra-Time window resolves over everything polled so far
-        # (the live status would otherwise short-circuit the parent's minute-by-minute scan).
-        start = self.clock.window_start(self.window)
-        if self.clock.is_extra_time(self.window):
+    def _window_actuals_for(self, window: int) -> dict[str, int]:
+        """Actuals (per-stat deltas) for one window. A live Extra-Time window resolves over
+        everything polled so far (its end minute is discovered, not on the clock)."""
+        start = self.clock.window_start(window)
+        if self.clock.is_extra_time(window):
             end = self.feed.last_known_minute()
         else:
-            end = self.clock.window_end(self.window)
+            end = self.clock.window_end(window)
         a = self.feed.snapshot_at(start)
         b = self.feed.snapshot_at(end)
         from src.game.normalize_soccer import actuals_from_raw
         raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
         return actuals_from_raw(raw, _STATS_MENU)
 
-    def _after_predict(self, preds: list[Prediction], active_id: str,
-                       use_power: bool) -> None:
-        # Lock the picks, then wait out the window on the wall clock before resolving.
-        target = None if self.clock.is_extra_time(self.window) \
-            else self.clock.window_end(self.window)
+    def _on_lock(self, window: int, preds: list[Prediction], active_id: str,
+                 use_power: bool) -> WindowReport:
+        """Bridge from the screen: resolve `window` against the live feed, append any score
+        events, and return the report the screen renders inline (no cinematic screen)."""
+        actuals = self._window_actuals_for(window)
+        res = self.session.resolve_window(window=window, predictions=preds,
+                                          active_id=active_id, use_power=use_power,
+                                          actuals=actuals)
+        for ev in res.score_events:
+            self.score_codes.append(ev.to_code())
+        return build_window_report(
+            window=window, predictions=preds, actuals=actuals,
+            stat_labels=_STAT_LABELS,
+            success_value=self.session.success_meter.value,
+            concede_value=self.session.concede_meter.value,
+            success_threshold=_THRESH, concede_threshold=_THRESH_C,
+            success_fired=res.success_fired, concede_fired=res.concede_fired,
+            success_shot=res.success_shot, concede_shot=res.concede_shot)
 
-        def resolve() -> None:
-            Flow._after_predict(self, preds, active_id, use_power)
-
-        self.app.set_screen(LiveWaitScreen(
-            self.app, self.feed, self.feed_client, self.fixture_id,
-            target_minute=target, on_ready=resolve, poll_seconds=_POLL_SECONDS,
-            sim=self.sim))
-
-    def _after_cinematic(self) -> None:
+    def _to_final(self) -> None:
         team, opp = aggregate(self.score_codes)
-        self._idx += 1
-        if self._idx >= len(self._scored):
-            self.app.set_screen(FinalScreen(self.app, team, opp, None,
-                                            title=_HALFTIME_LABEL))
-        else:
-            self.window = self._scored[self._idx]
-            self._play_window()
+        self.app.set_screen(FinalScreen(self.app, team, opp, None,
+                                        title=_HALFTIME_LABEL))
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
-               is_lead: bool = False) -> None:
+               is_lead: bool = False, username: str = "") -> None:
     """Live single-player half. Park on a waiting screen until the API publishes the
     starting XI, then size the half from the live match clock and run the draft + windows.
-    Only the lead client (is_lead) spends API-Football quota; followers read the cache."""
+    Only the lead client (is_lead) spends API-Football quota; followers read the cache.
+
+    Warm cache: on entry the last saved relay snapshot for this user+fixture is replayed
+    into the feed so lineups/score/clock show instantly (no API call); each successful live
+    poll persists the fresh snapshot back so the next session is warm too."""
     feed = LiveFeed()
     for fx in (_LIVE.get("fixtures") or []):
         if fx.get("id") == fixture_id and fx.get("kickoff"):
             feed.seed_kickoff(fx["kickoff"])
             break
+
+    store = LocalStore()
+    key = cachep.cache_key(username, fixture_id)
+    blob = cachep.deserialize(store.get(key))
+    if blob and isinstance(blob.get("snapshot"), dict):
+        feed.record(blob["snapshot"])   # warm display instantly, no API call
+
+    def persist(snap: dict) -> None:
+        store.set(key, cachep.serialize(cachep.make_blob(snap, time.time())))
+
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
                              feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead)
     sim = SimMode(sim_mode)
@@ -300,7 +336,8 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
                                        title=_HALFTIME_LABEL))
             return
         pool = _pool_from_feed(feed)
-        LiveFlow(app, feed, feed_client, fixture_id, pool, plan, sim).start()
+        LiveFlow(app, feed, feed_client, fixture_id, pool, plan, sim,
+                 on_snapshot=persist).start()
 
     app.set_screen(LiveWaitScreen(app, feed, feed_client, fixture_id,
                                   target_minute=None, on_ready=begin,
@@ -309,7 +346,7 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
 
 
 def start_live_select(app: "App", sim_mode: bool = False,
-                      is_lead: bool = False) -> None:
+                      is_lead: bool = False, username: str = "") -> None:
     """Show the live-match picker (config live.fixtures), then play the chosen one live.
     This is the web/no-argument entry point for match day."""
     sim = SimMode(sim_mode)
@@ -318,7 +355,8 @@ def start_live_select(app: "App", sim_mode: bool = False,
     fixtures = _LIVE.get("fixtures") or []
 
     def picked(fixture_id: int) -> None:
-        start_live(app, fixture_id, sim_mode=sim_mode, is_lead=is_lead)
+        start_live(app, fixture_id, sim_mode=sim_mode, is_lead=is_lead,
+                   username=username)
 
     app.set_screen(FixtureSelectScreen(app, fixtures, picked, sim))
 
@@ -329,16 +367,17 @@ def start_app(app: "App", sim_mode: bool = False) -> None:
     the live scores; everyone else free-rides on the website cache."""
     def submitted(username: str) -> None:
         is_lead = username.strip().lower() == _LEAD_NAME.lower()
-        start_launcher(app, sim_mode=sim_mode, is_lead=is_lead)
+        start_launcher(app, sim_mode=sim_mode, is_lead=is_lead, username=username)
 
     app.set_screen(UsernameScreen(app, submitted))
 
 
-def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False) -> None:
+def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
+                   username: str = "") -> None:
     """Web entry: choose 'Live match' (real fixtures + relay) or 'Test game' (an offline
     recorded match, no API/no waiting) so the full flow can be tried without a live game."""
     def go_live() -> None:
-        start_live_select(app, sim_mode=sim_mode, is_lead=is_lead)
+        start_live_select(app, sim_mode=sim_mode, is_lead=is_lead, username=username)
 
     def go_sim() -> None:
         start_simulation(app, _LAUNCHER["test_sim"], sim_mode=True)
