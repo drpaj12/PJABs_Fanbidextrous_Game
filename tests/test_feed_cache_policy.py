@@ -18,6 +18,10 @@ def test_make_blob_then_round_trip():
 def test_deserialize_bad_text_is_none():
     assert p.deserialize("not json") is None
     assert p.deserialize(None) is None
+    # valid JSON that is not an object must also be rejected (locks the isinstance guard)
+    assert p.deserialize("123") is None
+    assert p.deserialize("[1, 2]") is None
+    assert p.deserialize("null") is None
 
 
 def test_should_poll_on_start():

@@ -20,6 +20,8 @@ def make_blob(snapshot: dict, now: float) -> dict:
 
 
 def serialize(blob: dict) -> str:
+    """Encode a blob for storage. The blob must be JSON-serializable (it is, by
+    construction -- make_blob wraps a relay snapshot, which is decoded JSON)."""
     return json.dumps(blob)
 
 
