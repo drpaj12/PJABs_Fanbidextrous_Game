@@ -2,9 +2,15 @@
 """Enter a username to start. on_submit(username) fires on Start / Enter.
 
 The caller decides what the name means (the lead client triggers the live polling).
-Text is captured via pygame TEXTINPUT so a phone's soft keyboard works; BACKSPACE and
-RETURN are handled through KEYDOWN. A tappable Start button covers touch-only devices.
+
+Input differs by platform because the pygbag/WASM canvas is not a real text field, so
+its soft keyboard never appears on a phone:
+  * Web (sys.platform == 'emscripten'): tap the field (or Start) to open the browser's
+    native prompt() dialog -- that is what pops the on-screen keyboard on mobile.
+  * Desktop: type inline. Text comes from TEXTINPUT ONLY (one source -> no double
+    characters); KEYDOWN handles backspace and enter.
 """
+import sys
 from typing import TYPE_CHECKING, Callable
 
 import pygame
@@ -19,16 +25,27 @@ _C = CONFIG["colors"]
 _TITLE = CONFIG["display"]["title"]
 _LEAD_NAME = CONFIG["client"]["lead_username"]
 _MAX_LEN = 16
+_IS_WEB = sys.platform == "emscripten"
 
 
 def _set_text_input(on: bool) -> None:
-    """Toggle SDL text input (raises the soft keyboard on mobile). Best-effort: some
-    pygbag/WASM backends do not implement it, so never let it crash the screen."""
+    """Toggle SDL text input on desktop. Best-effort: never let it crash the screen."""
     fn = "start_text_input" if on else "stop_text_input"
     try:
         getattr(pygame.key, fn)()
     except Exception:
         pass
+
+
+def _browser_prompt(message: str, default: str = "") -> str | None:
+    """The browser's native prompt() (web only). Returns the entry, or None if the
+    dialog is cancelled or unavailable."""
+    try:
+        import platform  # pygbag shims this with the JS window object
+        val = platform.window.prompt(message, default)
+        return None if val is None else str(val)
+    except Exception:
+        return None
 
 
 class UsernameScreen(Screen):
@@ -45,11 +62,28 @@ class UsernameScreen(Screen):
         self.field = pygame.Rect(x, LAYOUT.i("user_field_y", 330), bw, bh)
         self.start_btn = Button(
             pygame.Rect(x, LAYOUT.i("user_btn_y", 430), bw, bh), "Start")
-        _set_text_input(True)
+        if not _IS_WEB:
+            _set_text_input(True)
+
+    def _ask(self) -> None:
+        """Web: open the native prompt and store the result."""
+        val = _browser_prompt("Enter your username:", self.text)
+        if val is not None and val.strip():
+            self.text = val.strip()[:_MAX_LEN]
 
     def handle(self, event: pygame.event.Event) -> None:
         if self._submitted:
             return
+        if _IS_WEB:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.field.collidepoint(event.pos):
+                    self._ask()
+                elif self.start_btn.hit(event.pos):
+                    if not self.text.strip():
+                        self._ask()
+                    self._submit()
+            return
+        # Desktop: inline typing. TEXTINPUT is the only character source.
         if event.type == pygame.TEXTINPUT:
             if len(self.text) < _MAX_LEN and event.text.isprintable():
                 self.text += event.text
@@ -58,11 +92,6 @@ class UsernameScreen(Screen):
                 self.text = self.text[:-1]
             elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 self._submit()
-            elif event.unicode and event.unicode.isprintable() \
-                    and len(self.text) < _MAX_LEN and event.key != pygame.K_TAB:
-                # Fallback for backends that send KEYDOWN.unicode but no TEXTINPUT.
-                if not (pygame.key.get_mods() & pygame.KMOD_CTRL):
-                    self.text += event.unicode
         elif event.type == pygame.MOUSEBUTTONDOWN and self.start_btn.hit(event.pos):
             self._submit()
 
@@ -82,15 +111,23 @@ class UsernameScreen(Screen):
         t = tf.render(_TITLE, True, _C["white"])
         surface.blit(t, t.get_rect(center=(sw // 2, LAYOUT.i("fixsel_title_y", 150))))
         sf = font(LAYOUT.i("ui_body_size", 22))
-        s = sf.render("Enter a username to start", True, _C["accent"])
+        prompt = "Tap the box to enter a username" if _IS_WEB \
+            else "Enter a username to start"
+        s = sf.render(prompt, True, _C["accent"])
         surface.blit(s, s.get_rect(center=(sw // 2, LAYOUT.i("fixsel_sub_y", 220))))
         # text field
         radius = LAYOUT.i("ui_btn_radius", 12)
         pygame.draw.rect(surface, _C["surface"], self.field, border_radius=radius)
         pygame.draw.rect(surface, _C["border"], self.field, width=2, border_radius=radius)
         ff = font(LAYOUT.i("ui_body_size", 22) + 4)
-        shown = self.text + ("|" if self._caret < 0.5 else "")
-        tx = ff.render(shown or " ", True, _C["white"])
+        if self.text:
+            caret = "|" if (not _IS_WEB and self._caret < 0.5) else ""
+            shown = self.text + caret
+            color = _C["white"]
+        else:
+            shown = "Tap to type..." if _IS_WEB else " "
+            color = _C["text_dim"]
+        tx = ff.render(shown, True, color)
         surface.blit(tx, tx.get_rect(midleft=(self.field.x + 14, self.field.centery)))
         self.start_btn.draw(surface, sf)
         hint = font(LAYOUT.i("ui_small_size", 17))
