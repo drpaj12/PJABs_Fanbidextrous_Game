@@ -54,7 +54,8 @@ class LiveWaitScreen(Screen):
                  fixture_id: int, target_minute: Optional[int],
                  on_ready: Callable[[], None], poll_seconds: float,
                  sim: Optional[SimMode] = None,
-                 wait_for_lineups: bool = False) -> None:
+                 wait_for_lineups: bool = False,
+                 wait_for_second_half: bool = False) -> None:
         super().__init__(app)
         self.feed = feed
         self.feed_client = feed_client
@@ -64,6 +65,7 @@ class LiveWaitScreen(Screen):
         self.poll_seconds = poll_seconds
         self.sim = sim
         self.wait_for_lineups = wait_for_lineups
+        self.wait_for_second_half = wait_for_second_half
         # Lead polls immediately; followers wait out the delay so the lead writes first.
         delay = 0.0 if feed_client.is_lead else _FOLLOWER_DELAY
         self._since_poll = poll_seconds - delay
@@ -102,6 +104,9 @@ class LiveWaitScreen(Screen):
 
     def _is_ready(self) -> bool:
         status = self.feed.match_status()
+        if self.wait_for_second_half:
+            return (self.feed.status_short().upper() == "2H"
+                    or status == _FINISHED_STATUS)
         if self.wait_for_lineups:
             return self.feed.has_lineups()
         half_over = status in (_HALFTIME_STATUS, _FINISHED_STATUS)
@@ -135,6 +140,8 @@ class LiveWaitScreen(Screen):
 
     # -- drawing ------------------------------------------------------------
     def _wait_label(self) -> str:
+        if self.wait_for_second_half:
+            return "Second half starts soon..."
         if self.wait_for_lineups:
             return "Waiting for team sheets..."
         if self.target_minute is None:
