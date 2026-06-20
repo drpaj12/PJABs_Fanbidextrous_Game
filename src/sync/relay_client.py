@@ -28,12 +28,23 @@ class UrllibTransport:
             return r.read().decode("utf-8")
 
 
+def default_transport() -> Transport:
+    """Pick the right transport for the runtime: the browser's fetch() in pygbag/WASM
+    (urllib has no sockets there), urllib everywhere else. FetchTransport is imported
+    lazily so desktop and tests never touch the pygbag-only platform.window."""
+    import sys
+    if sys.platform == "emscripten":
+        from src.sync.wasm_transport import FetchTransport
+        return FetchTransport()
+    return UrllibTransport()
+
+
 class RelayClient:
     def __init__(self, base_url: str, transport: Transport | None = None,
                  api_path: str = "/soccer_api.php") -> None:
         self._base = base_url.rstrip("/")
         self._path = api_path
-        self._t = transport or UrllibTransport()
+        self._t = transport or default_transport()
 
     def _url(self, action: str, room: int, token: str = "") -> str:
         url = f"{self._base}{self._path}?action={action}&room={room}"

@@ -6,7 +6,7 @@ whatever the relay has cached. The client just asks for a fixture id.
 """
 import json
 from typing import Any
-from src.sync.relay_client import Transport, UrllibTransport
+from src.sync.relay_client import Transport, default_transport
 
 
 class FeedClient:
@@ -14,7 +14,7 @@ class FeedClient:
                  feed_path: str = "/feed_cache.php", is_lead: bool = False) -> None:
         self._base = base_url.rstrip("/")
         self._path = feed_path
-        self._t = transport or UrllibTransport()
+        self._t = transport or default_transport()
         self._is_lead = is_lead
 
     async def get_feed(self, fixture_id: int) -> dict[str, Any]:
