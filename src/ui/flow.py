@@ -39,6 +39,7 @@ from src.ui.screens.status_screens import FinalScreen, RevealScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.ui.screens.live_play_screen import LivePlayScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
+from src.game.schedule import load_schedule
 from src.ui.screens.launcher_screen import LauncherScreen
 from src.ui.screens.username_screen import UsernameScreen
 from src.utils.constants import CONFIG, load_data
@@ -387,18 +388,25 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
 
 def start_live_select(app: "App", sim_mode: bool = False,
                       is_lead: bool = False, username: str = "") -> None:
-    """Show the live-match picker (config live.fixtures), then play the chosen one live.
-    This is the web/no-argument entry point for match day."""
+    """Show the dynamic live-match picker, then play the chosen game live. Reads the
+    curated schedule (assets/data/schedule.json via live.schedule); the rolling-window
+    viewer orders games soonest-first and lets the player tap any not-yet-finished game.
+    Web/no-argument entry point for match day."""
     sim = SimMode(sim_mode)
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
-    fixtures = _LIVE.get("fixtures") or []
+    sched_cfg = _LIVE["schedule"]
+    try:
+        raw = load_data(f'{CONFIG["assets"]["data_dir"]}/{sched_cfg["file"]}')
+    except (OSError, ValueError):
+        raw = {"games": []}                      # empty-state screen, never a crash
+    games = load_schedule(raw)
 
     def picked(fixture_id: int) -> None:
         start_live(app, fixture_id, sim_mode=sim_mode, is_lead=is_lead,
                    username=username)
 
-    app.set_screen(FixtureSelectScreen(app, fixtures, picked, sim))
+    app.set_screen(FixtureSelectScreen(app, games, picked, sched_cfg, sim))
 
 
 def start_app(app: "App", sim_mode: bool = False) -> None:
