@@ -49,6 +49,7 @@ _C = CONFIG["colors"]
 _STATS = load_data(CONFIG["assets"]["stats_menu_file"])["stats"]
 _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
 _FINISHED_STATUS = "finished"
+_LIVE_STATUS = "live"
 _FOLLOWER_DELAY = CONFIG["feed"]["follower_poll_delay_seconds"]
 _WARN_S = CONFIG["live"]["warn_minutes_before"] * 60
 _START_S = CONFIG["live"]["start_minutes_before"] * 60
@@ -77,13 +78,24 @@ def windows_ready(pending: set[int], last_known_minute: int,
     return sorted(w for w in pending if last_known_minute >= clock.window_end(w))
 
 
+def windows_to_enter(max_entered: int, playing_window: int) -> list[int]:
+    """Window indices to lock this frame, using a monotonic high-water mark instead of a
+    frame delta. Forward progress (incl. catch-up after a backgrounded tab) returns the new
+    indices; a backward clock correction from re-alignment returns [] so an already-played
+    window is never re-locked."""
+    return list(range(max_entered + 1, playing_window + 1))
+
+
 class LivePlayScreen(Screen):
     def __init__(self, app: "App", feed: LiveFeed, feed_client: FeedClient,
                  match_clock: MatchClock, fixture_id: int,
                  editing_window_start: int,
                  on_lock: Callable[[int, list[Prediction], str, bool], WindowReport],
                  on_finished: Callable[[], None], poll_seconds: float,
-                 available: list[DraftedAthlete], now_fn: Callable[[], float] = time.time,
+                 available: list[DraftedAthlete],
+                 half_label: str = "",
+                 resync_threshold_seconds: float = 30.0,
+                 now_fn: Callable[[], float] = time.time,
                  sim: Optional[SimMode] = None,
                  on_snapshot: Optional[Callable[[dict], None]] = None) -> None:
         super().__init__(app)
@@ -96,6 +108,8 @@ class LivePlayScreen(Screen):
         self.on_finished = on_finished
         self.poll_seconds = poll_seconds
         self.available = available
+        self.half_label = half_label
+        self._resync_threshold = resync_threshold_seconds
         self.now_fn = now_fn
         self.sim = sim
         self.on_snapshot = on_snapshot
@@ -120,7 +134,8 @@ class LivePlayScreen(Screen):
 
         # -- wall-clock + polling --
         now = self.now_fn()
-        self._last_now = now
+        # High-water mark of the highest playing window entered so far (re-align safe).
+        self._max_entered = editing_window_start - 1
         # Lead polls on the first eligible frame; followers offset so the lead writes first.
         delay = 0.0 if feed_client.is_lead else _FOLLOWER_DELAY
         self._last_poll_epoch = now - poll_seconds + delay
@@ -207,16 +222,23 @@ class LivePlayScreen(Screen):
                 and now - self._last_poll_epoch >= self.poll_seconds):
             self._kick_poll(now)
 
-        # Lock each newly-entered window and queue the one before it for resolution.
+        # Re-align the wall clock to the API minute when our estimate has drifted; the
+        # second-half anchor starts as an estimate and the first-half anchor can lag too.
+        if self.feed.match_status() == _LIVE_STATUS and self.feed.current_minute() > 0:
+            api_in_half = max(0, self.feed.current_minute() - self.mc.clock.start_minute)
+            self.mc = self.mc.realign(api_in_half, now, self._resync_threshold)
+
+        # Lock each newly-entered window (high-water mark) and queue the one before it.
+        cur = self.mc.playing_window(now)
         for lock_w, resolve_w in lock_and_resolve_plan(
-                self.mc.windows_entered(self._last_now, now), self.editing_start):
+                windows_to_enter(self._max_entered, cur), self.editing_start):
             self._lock_window(lock_w)
             if (resolve_w is not None and resolve_w in self._locked
                     and self._locked[resolve_w][1]):
                 self._pending_resolve.add(resolve_w)
             self.edit_window = lock_w + 1
             self._reset_editor()
-        self._last_now = now
+        self._max_entered = max(self._max_entered, cur)
 
         # Resolve queued windows only once the feed actually covers their end minute, so a
         # window slept through (or stalled during a lead outage) scores against real totals
@@ -402,11 +424,12 @@ class LivePlayScreen(Screen):
 
         # Header: running match clock (from MatchClock, NOT the feed minute) + score/status.
         hf = font(LAYOUT.i("liveplay_header_size", 20))
-        header = f"Editing window {self.edit_window}"
-        surface.blit(hf.render(header, True, _C["text_dim"]),
+        header = (f"{self.half_label}  -  Editing window {self.edit_window}"
+                  if self.half_label else f"Editing window {self.edit_window}")
+        surface.blit(hf.render(header, True, _C["accent"]),
                      (m, LAYOUT.i("liveplay_header_y", 16)))
         cf = font(LAYOUT.i("liveplay_clock_size", 30))
-        surface.blit(cf.render(f"{self.mc.current_minute(now)}'", True, _C["accent"]),
+        surface.blit(cf.render(f"{self.mc.display_minute(now)}'", True, _C["accent"]),
                      (m, LAYOUT.i("liveplay_clock_y", 44)))
         sf = font(LAYOUT.i("liveplay_score_size", 17))
         score = f"{self.feed.home_team()} v {self.feed.away_team()}".strip(" v")
