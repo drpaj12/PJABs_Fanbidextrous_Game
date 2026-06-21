@@ -11,9 +11,11 @@ from src.sync.relay_client import Transport, default_transport
 
 class FeedClient:
     def __init__(self, base_url: str, transport: Transport | None = None,
-                 feed_path: str = "/feed_cache.php", is_lead: bool = False) -> None:
+                 feed_path: str = "/feed_cache.php", is_lead: bool = False,
+                 live_fixtures_path: str = "/live_fixtures.php") -> None:
         self._base = base_url.rstrip("/")
         self._path = feed_path
+        self._live_path = live_fixtures_path
         self._t = transport or default_transport()
         self._is_lead = is_lead
 
@@ -32,4 +34,12 @@ class FeedClient:
         url = f"{self._base}{self._path}?fixture={fixture_id}"
         if self._is_lead:
             url += "&lead=1"
+        return json.loads(await self._t.get(url))
+
+    async def get_live_fixtures(self) -> dict[str, Any]:
+        """Fetch the currently-live World Cup fixtures (filtered server-side) so the client
+        can match a picked game to its real fixture id. Lead-gated like get_feed."""
+        url = f"{self._base}{self._live_path}"
+        if self._is_lead:
+            url += "?lead=1"
         return json.loads(await self._t.get(url))

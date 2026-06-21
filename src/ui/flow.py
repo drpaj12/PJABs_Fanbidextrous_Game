@@ -37,6 +37,7 @@ from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
 from src.ui.screens.status_screens import FinalScreen, RevealScreen
 from src.ui.screens.live_wait_screen import LiveWaitScreen
+from src.ui.screens.live_resolve_screen import LiveResolveScreen
 from src.ui.screens.live_play_screen import LivePlayScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
 from src.game.schedule import load_schedule
@@ -60,6 +61,7 @@ _FULLTIME_LABEL = CONFIG["game"]["fulltime_label"]
 _ET_LABEL = CONFIG["game"]["extra_time_label"]
 _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
 _POLL_SECONDS = CONFIG["feed"]["poll_seconds"]
+_RESOLVE_POLL_SECONDS = CONFIG["feed"]["live_resolve_poll_seconds"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
 _PREGAME = CONFIG["pregame"]
 _LIVE = CONFIG["live"]
@@ -311,10 +313,17 @@ class LiveFlow(Flow):
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
-               is_lead: bool = False, username: str = "", kickoff_utc: str = "") -> None:
+               is_lead: bool = False, username: str = "", kickoff_utc: str = "",
+               home: str = "", away: str = "") -> None:
     """Live single-player half. Park on a waiting screen until the API publishes the
     starting XI, then size the half from the live match clock and run the draft + windows.
     Only the lead client (is_lead) spends API-Football quota; followers read the cache.
+
+    Live id resolution: when home/away are given (the picker path), the schedule's synthetic
+    id is NOT a real API-Football id. A LiveResolveScreen first matches the picked teams to
+    whatever World Cup match is in play now (live_fixtures.php) to learn the real id, then the
+    rest of the flow runs against that real id. The --live single-fixture path passes a real
+    id directly with no home/away and skips resolution.
 
     Warm cache: on entry the last saved relay snapshot for this user+fixture is replayed
     into the feed so lineups/score/clock show instantly (no API call); each successful live
@@ -329,17 +338,9 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
             break
     feed.seed_kickoff(kickoff_utc)   # picked-game kickoff wins (seed_kickoff no-ops if "")
 
-    store = LocalStore()
-    key = cachep.cache_key(username, fixture_id)
-    blob = cachep.deserialize(store.get(key))
-    if blob and isinstance(blob.get("snapshot"), dict):
-        feed.record(blob["snapshot"])   # warm display instantly, no API call
-
-    def persist(snap: dict) -> None:
-        store.set(key, cachep.serialize(cachep.make_blob(snap, time.time())))
-
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
-                             feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead)
+                             feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead,
+                             live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
     sim = SimMode(sim_mode)
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
@@ -352,42 +353,63 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
             app, ["This match has no half left to play.", "Pick another match."],
             on_continue=to_picker))
 
-    def launch_half(half: int) -> None:
-        start_minute = 0 if half == 1 else _HALF_MIN
-        clock = HalfClock(_HALF_MIN, _WINDOW_MIN, start_minute=start_minute)
-        now_now = time.time()
-        if half == 1:
-            secs = seconds_to_kickoff(feed.kickoff_iso(), now_now)
-            kickoff_epoch = now_now + secs if secs is not None else now_now
-        else:
-            in_half = max(0, feed.current_minute() - _HALF_MIN)
-            kickoff_epoch = now_now - in_half * 60          # estimate; screen re-aligns
-        elapsed_in_half = max(0, feed.current_minute() - start_minute)
-        plan = live_plan(elapsed_in_half, feed.match_status(), clock)
-        if not plan.scored_windows:
-            no_half_left()
-            return
-        pool = _pool_from_feed(feed)
-        LiveFlow(app, feed, feed_client, fixture_id, pool, half, clock,
-                 kickoff_epoch, sim, to_picker, on_snapshot=persist).start()
+    def run_with(real_id: int) -> None:
+        """Everything downstream of id resolution: warm the cache for the REAL id, then run
+        the lineups wait -> draft -> live windows against it."""
+        store = LocalStore()
+        key = cachep.cache_key(username, real_id)
+        blob = cachep.deserialize(store.get(key))
+        if blob and isinstance(blob.get("snapshot"), dict):
+            feed.record(blob["snapshot"])   # warm display instantly, no API call
 
-    def begin() -> None:
-        choice = pick_half(feed.status_short(), feed.current_minute(),
-                           _HALF_MIN, _JOIN_CUTOFF)
-        if choice.half is None:
-            no_half_left()
-        elif choice.needs_wait:
-            app.set_screen(LiveWaitScreen(
-                app, feed, feed_client, fixture_id, target_minute=None,
-                on_ready=lambda: launch_half(2), poll_seconds=_POLL_SECONDS,
-                sim=sim, wait_for_second_half=True))
-        else:
-            launch_half(choice.half)
+        def persist(snap: dict) -> None:
+            store.set(key, cachep.serialize(cachep.make_blob(snap, time.time())))
 
-    app.set_screen(LiveWaitScreen(app, feed, feed_client, fixture_id,
-                                  target_minute=None, on_ready=begin,
-                                  poll_seconds=_POLL_SECONDS, sim=sim,
-                                  wait_for_lineups=True, on_back=to_picker))
+        def launch_half(half: int) -> None:
+            start_minute = 0 if half == 1 else _HALF_MIN
+            clock = HalfClock(_HALF_MIN, _WINDOW_MIN, start_minute=start_minute)
+            now_now = time.time()
+            if half == 1:
+                secs = seconds_to_kickoff(feed.kickoff_iso(), now_now)
+                kickoff_epoch = now_now + secs if secs is not None else now_now
+            else:
+                in_half = max(0, feed.current_minute() - _HALF_MIN)
+                kickoff_epoch = now_now - in_half * 60          # estimate; screen re-aligns
+            elapsed_in_half = max(0, feed.current_minute() - start_minute)
+            plan = live_plan(elapsed_in_half, feed.match_status(), clock)
+            if not plan.scored_windows:
+                no_half_left()
+                return
+            pool = _pool_from_feed(feed)
+            LiveFlow(app, feed, feed_client, real_id, pool, half, clock,
+                     kickoff_epoch, sim, to_picker, on_snapshot=persist).start()
+
+        def begin() -> None:
+            choice = pick_half(feed.status_short(), feed.current_minute(),
+                               _HALF_MIN, _JOIN_CUTOFF)
+            if choice.half is None:
+                no_half_left()
+            elif choice.needs_wait:
+                app.set_screen(LiveWaitScreen(
+                    app, feed, feed_client, real_id, target_minute=None,
+                    on_ready=lambda: launch_half(2), poll_seconds=_POLL_SECONDS,
+                    sim=sim, wait_for_second_half=True))
+            else:
+                launch_half(choice.half)
+
+        app.set_screen(LiveWaitScreen(app, feed, feed_client, real_id,
+                                      target_minute=None, on_ready=begin,
+                                      poll_seconds=_POLL_SECONDS, sim=sim,
+                                      wait_for_lineups=True, on_back=to_picker))
+
+    if home and away:
+        app.set_screen(LiveResolveScreen(
+            app, feed_client, home, away,
+            kickoff_iso=(feed.kickoff_iso() or kickoff_utc),
+            on_resolved=run_with, poll_seconds=_RESOLVE_POLL_SECONDS,
+            fallback_id=fixture_id, sim=sim, on_back=to_picker))
+    else:
+        run_with(fixture_id)
 
 
 def start_live_select(app: "App", sim_mode: bool = False,
@@ -409,7 +431,8 @@ def start_live_select(app: "App", sim_mode: bool = False,
     def picked(fixture_id: int) -> None:
         game = next((g for g in games if g.id == fixture_id), None)
         start_live(app, fixture_id, sim_mode=sim_mode, is_lead=is_lead,
-                   username=username, kickoff_utc=(game.kickoff_utc if game else ""))
+                   username=username, kickoff_utc=(game.kickoff_utc if game else ""),
+                   home=(game.home if game else ""), away=(game.away if game else ""))
 
     app.set_screen(FixtureSelectScreen(app, games, picked, sched_cfg, sim))
 

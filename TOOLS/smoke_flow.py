@@ -420,9 +420,64 @@ def schedule_smoke() -> int:
     return 0 if ok else 1
 
 
+def resolve_smoke() -> int:
+    """Drive LiveResolveScreen headlessly: a fake transport returns a live=all payload, and
+    the screen must fire on_resolved with the REAL id whose teams match the picked game. Also
+    asserts a non-matching pick keeps polling (never resolves). Returns 0 on OK."""
+    import asyncio
+    import json
+    from src.ui.app import App
+    from src.ui.sim import SimMode
+    from src.sync.feed_client import FeedClient
+    from src.ui.screens.live_resolve_screen import LiveResolveScreen
+
+    payload = json.dumps({"response": [
+        {"id": 1489397, "home": "Spain", "away": "Saudi Arabia", "status": "1H"},
+        {"id": 1539006, "home": "Belgium", "away": "IR Iran", "status": "1H"},
+    ], "cached_at": 0})
+
+    class FakeTransport:
+        async def get(self, url: str) -> str:
+            return payload
+
+    async def drive(home: str, away: str) -> list[int]:
+        # Runs inside our dedicated loop, so the screen's fire-and-forget
+        # ensure_future(self._poll()) schedules on it; awaiting sleep(0) lets it complete.
+        app = App()
+        client = FeedClient("http://x", transport=FakeTransport(), is_lead=True)
+        got: list[int] = []
+        screen = LiveResolveScreen(
+            app, client, home, away, kickoff_iso="", on_resolved=got.append,
+            poll_seconds=0.0, fallback_id=999, sim=SimMode(False))
+        for _ in range(5):                  # update polls (ensure_future) + resolve attempt
+            screen.update(0.1)
+            await asyncio.sleep(0)          # let the poll task complete
+            app.screen.fill((0, 0, 0))
+            screen.draw(app.screen)         # draw must not raise
+        return got
+
+    # Use a dedicated loop WITHOUT set_event_loop so we never disturb the default loop the
+    # live smokes left fire-and-forget poll tasks on (avoids spurious shutdown warnings).
+    loop = asyncio.new_event_loop()
+    try:
+        match = loop.run_until_complete(drive("Belgium", "Iran"))   # IR Iran == Iran, swapped
+        no_match = loop.run_until_complete(drive("Brazil", "Argentina"))
+    finally:
+        loop.close()
+
+    match_ok = match == [1539006]
+    nomatch_ok = no_match == []
+    print(("OK" if match_ok else "FAIL"),
+          "resolve smoke: matched id =", match, "(expected [1539006])")
+    print(("OK" if nomatch_ok else "FAIL"),
+          "resolve smoke: unmatched pick stays unresolved =", no_match, "(expected [])")
+    return 0 if (match_ok and nomatch_ok) else 1
+
+
 if __name__ == "__main__":
     rc_offline = main()
     rc_live = live_smoke()
     rc_live_2h = live_smoke_2h()
     rc_schedule = schedule_smoke()
-    raise SystemExit(rc_offline or rc_live or rc_live_2h or rc_schedule)
+    rc_resolve = resolve_smoke()
+    raise SystemExit(rc_offline or rc_live or rc_live_2h or rc_schedule or rc_resolve)

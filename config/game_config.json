@@ -53,6 +53,7 @@
     "_comment": "poll_seconds 300 = one 5-minute poll per window. Only the lead client triggers upstream fetches (see relay cache_ttl + client.lead_username), so a full half is ~10 refreshes x 2 calls + 1 lineups = ~21 queries/game; 3 games < 80/day. follower_poll_delay_seconds offsets non-lead polls so the lead's fresh write lands in the cache before followers read it.",
     "poll_seconds": 300,
     "follower_poll_delay_seconds": 15,
+    "live_resolve_poll_seconds": 30,
     "halftime_status": "halftime"
   },
   "client": {
@@ -68,7 +69,8 @@
   "relay": {
     "base_url": "https://drpeterjamieson.com/PROJECTS/PREDICTOR/PHP_SCRIPTS",
     "api_path": "/soccer_api.php",
-    "feed_path": "/feed_cache.php"
+    "feed_path": "/feed_cache.php",
+    "live_fixtures_path": "/live_fixtures.php"
   },
   "live": {
     "_comment": "fixture_id is the single-game default for --live; fixtures seeds the live feed kickoff for the curated set. The PICKER now reads assets/data/schedule.json (live.schedule) instead of fixtures. Free tier = 100 req/day; relay caches per fixture, fetches lineups once. warn_minutes_before: show a 'too early, come back later' notice when kickoff is further off than this. start_minutes_before: the lead does not poll the API until kickoff is within this many minutes (saves quota); a kickoff countdown shows meanwhile.",

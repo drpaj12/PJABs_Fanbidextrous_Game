@@ -1,7 +1,32 @@
 # Real Fixture ID Harvest -- Design
 
 **Date:** 2026-06-20
-**Status:** Approved (pending probe confirmation)
+**Status:** SUPERSEDED (2026-06-21) by live id resolution -- see
+`docs/superpowers/specs/2026-06-21-live-fixture-id-resolution-design.md`.
+
+## Why superseded
+
+The blocking premise below was only half right. Re-probing on 2026-06-21 showed the free
+tier DOES serve 2026 World Cup data by DIRECT fixture id (`feed_cache.php?fixture=<id>`
+returns full real lineups/statistics) and via the un-season-gated `fixtures?live=all`
+endpoint. Only the season-filtered LIST query (`fixtures?league=1&season=2026&date=...`) is
+paywalled. So we never needed to harvest/prefetch ids: we resolve the real id at play time
+by matching the picked offline game to whatever World Cup match is in play now. The harvest
+endpoint `fixtures.php` is left in place but unused.
+
+---
+**(original, now-obsolete status below)**
+**Status:** BLOCKED by probe -- free-tier key has no 2026-season access.
+
+## Probe result (2026-06-20)
+
+`GET fixtures.php?date=2026-06-20&lead=1` reached API-Football and authenticated, but
+returned `results: 0` with `errors.plan = "Free plans do not have access to this season,
+try from 2022 to 2024."`. The free tier serves only seasons 2022-2024. This blocks not
+just the id harvest but ALL real 2026 World Cup data (lineups/statistics for a 2026 fixture
+are behind the same paywall). `fixtures.php` itself works; only the season is unavailable.
+Awaiting a direction decision (paid plan for 2026 vs. 2022-2024 real-data demo vs. stay
+simulated).
 
 ## Problem
 
