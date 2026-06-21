@@ -122,6 +122,20 @@ _FIELD_TO_API = {
 }
 
 
+def _no_reuse_before_recycle(picks: list, cycle_len: int) -> bool:
+    """True if no athlete id repeats within a rotation cycle: walk the picks, tracking the
+    ids seen this cycle, and reset the moment the cycle fills (cycle_len distinct ids). A
+    repeat before the reset means the screen offered an already-used player -- the bug."""
+    seen: set = set()
+    for pid in picks:
+        if pid in seen:
+            return False
+        seen.add(pid)
+        if len(seen) >= cycle_len:
+            seen = set()
+    return True
+
+
 def _relay_snapshot(stats: dict, elapsed: int, status_short: str) -> dict:
     """Build one relay-shaped snapshot (the feed_cache.php shape LiveFeed.record ingests)
     from a flat demo stats dict at a given match minute/status."""
@@ -149,6 +163,7 @@ def live_smoke() -> int:
     from src.game.window_report import build_window_report
     from src.ui.sim import SimMode
     from src.ui.screens.live_play_screen import LivePlayScreen
+    from src.game.roster import Roster
     from src.sync.feed_client import FeedClient
     from src.utils.constants import CONFIG
 
@@ -157,18 +172,26 @@ def live_smoke() -> int:
     poll_seconds = CONFIG["feed"]["poll_seconds"]
     stat_labels = flow._STAT_LABELS
 
-    # Pre-warm the feed with the in-play (1H) snapshots only. The final halftime snapshot
-    # is withheld and recorded by the driver once the injected clock reaches it -- otherwise
-    # the feed would report halftime on the first update() and short-circuit the boundary
-    # logic before any window locks. The demo script reports halftime at minute 48 (3
-    # minutes of first-half stoppage).
+    # Feed snapshots are recorded INCREMENTALLY as the injected clock advances (one per
+    # match minute), NOT pre-warmed in a block. Pre-warming to minute 45 would make the feed
+    # report minute 45 on the first update(), the re-align would snap the clock forward, and
+    # every window would batch-lock in one frame -- which (now that each window forces a fresh
+    # pick) would leave all but the current window player-less. Real play enters one window
+    # per 5-minute boundary with a deliberate pick each time; the incremental feed mirrors
+    # that so the no-reuse / recycle path is genuinely exercised across all nine windows.
     demo = flow._demo_script()
-    halftime_snap = demo["snapshots"][-1]
-    halftime_minute = halftime_snap["minute"]
+    halftime_minute = demo["snapshots"][-1]["minute"]    # 48 (3 min of first-half stoppage)
+
+    def stats_at(minute: int) -> dict:
+        """Cumulative stats at `minute`: the latest demo snapshot at or before it."""
+        chosen = demo["snapshots"][0]["stats"]
+        for snap in demo["snapshots"]:
+            if snap["minute"] <= minute:
+                chosen = snap["stats"]
+        return chosen
+
     feed = LiveFeed()
-    for snap in demo["snapshots"][:-1]:                   # all but the halftime snapshot
-        minute = snap["minute"]
-        feed.record(_relay_snapshot(snap["stats"], minute, "1H"), minute=minute)
+    feed.record(_relay_snapshot(stats_at(0), 0, "1H"), minute=0)
 
     clock = HalfClock(half_min, window_min)
     et_window = clock.extra_time_window
@@ -180,14 +203,20 @@ def live_smoke() -> int:
     match_clock = MatchClock(kickoff_epoch=0.0, clock=clock)
     editing_start = match_clock.editing_window(now_fn())
 
-    available = flow._demo_pool()[:6]
+    # Real Roster of six (mirrors the flow), so the screen offers only roster.available().
+    roster = Roster(flow._demo_pool()[:6])
 
     locks: list[int] = []
+    picks: list[str] = []
 
     def on_lock(window, preds, active_id, use_power):
-        """Record the lock and return a valid WindowReport (scoring is unit-tested
-        elsewhere; this only feeds the screen's inline-reveal path)."""
+        """Record the resolved window + the player it scored. The screen has ALREADY reserved
+        the player on the roster at lock time (LivePlayScreen._lock_window calls roster.use),
+        so on_lock must NOT spend it again. If the screen ever re-offered a player still in use,
+        that lock-time roster.use would raise inside update() and crash this smoke -- exactly
+        the regression the live build hit. Returns a valid WindowReport for the reveal path."""
         locks.append(window)
+        picks.append(active_id)
         return build_window_report(
             window=window, predictions=preds, actuals={},
             stat_labels=stat_labels, success_value=0, concede_value=0,
@@ -207,16 +236,15 @@ def live_smoke() -> int:
     screen = LivePlayScreen(
         app=app, feed=feed, feed_client=feed_client, match_clock=match_clock,
         fixture_id=1, editing_window_start=editing_start, on_lock=on_lock,
-        on_finished=on_finished, poll_seconds=poll_seconds, available=available,
+        on_finished=on_finished, poll_seconds=poll_seconds, roster=roster,
         now_fn=now_fn, sim=sim)
 
     ok = True
     for step in range(0, 55):
         holder["t"] += 60.0                  # advance one match minute
         minute = int(holder["t"] // 60)
-        if minute >= halftime_minute:        # half-time snapshot arrives on the clock
-            feed.record(_relay_snapshot(halftime_snap["stats"], minute, "HT"),
-                        minute=minute)
+        status = "HT" if minute >= halftime_minute else "1H"
+        feed.record(_relay_snapshot(stats_at(minute), minute, status), minute=minute)
         screen._auto_pick()                  # lock all dials + pick an active player
         screen.update(0.0)
         if finished["done"]:
@@ -225,12 +253,15 @@ def live_smoke() -> int:
     expected = list(range(editing_start, et_window + 1))
     in_order = locks == sorted(locks)
     locked_expected = locks == expected
-    if not (finished["done"] and in_order and locked_expected):
+    no_reuse = _no_reuse_before_recycle(picks, len(roster.all_athletes()))
+    if not (finished["done"] and in_order and locked_expected and no_reuse):
         ok = False
 
     print(("OK" if locked_expected else "FAIL"),
           "live smoke: locked windows =", locks, "(expected", expected, ")")
     print(("OK" if in_order else "FAIL"), "live smoke: windows locked in order")
+    print(("OK" if no_reuse else "FAIL"),
+          "live smoke: no player re-used before recycle; picks =", picks)
     print(("OK" if finished["done"] else "FAIL"),
           "live smoke: reached final screen (on_finished fired)")
     return 0 if ok else 1
@@ -271,6 +302,7 @@ def live_smoke_2h() -> int:
     from src.game.window_report import build_window_report
     from src.ui.sim import SimMode
     from src.ui.screens.live_play_screen import LivePlayScreen
+    from src.game.roster import Roster
     from src.sync.feed_client import FeedClient
     from src.utils.constants import CONFIG
 
@@ -281,16 +313,22 @@ def live_smoke_2h() -> int:
     second_half_label = CONFIG["game"]["second_half_label"]
     stat_labels = flow._STAT_LABELS
 
-    # Pre-warm with the in-play (2H) snapshots only; withhold the full-time snapshot so the
-    # feed does not report finished on the first update() and short-circuit before any window
-    # locks. The driver records FT once the injected clock reaches it.
+    # Feed snapshots are recorded incrementally as the injected clock advances (see the 1H
+    # smoke for why pre-warming would batch-lock every window in one frame). Snapshots are
+    # keyed by ABSOLUTE match minute (45-93); status is 2H in play, FT at full time.
     demo = _demo_script_2h()
-    ft_snap = demo["snapshots"][-1]
-    ft_minute = ft_snap["minute"]                        # absolute (93)
+    ft_minute = demo["snapshots"][-1]["minute"]          # absolute (93)
+
+    def stats_at(abs_minute: int) -> dict:
+        """Cumulative stats at an absolute match minute: latest snapshot at or before it."""
+        chosen = demo["snapshots"][0]["stats"]
+        for snap in demo["snapshots"]:
+            if snap["minute"] <= abs_minute:
+                chosen = snap["stats"]
+        return chosen
+
     feed = LiveFeed()
-    for snap in demo["snapshots"][:-1]:                   # all but the full-time snapshot
-        minute = snap["minute"]
-        feed.record(_relay_snapshot(snap["stats"], minute, "2H"), minute=minute)
+    feed.record(_relay_snapshot(stats_at(half_min), half_min, "2H"), minute=half_min)
 
     clock = HalfClock(half_min, window_min, start_minute=half_min)   # second-half clock
     et_window = clock.extra_time_window
@@ -302,12 +340,16 @@ def live_smoke_2h() -> int:
     match_clock = MatchClock(kickoff_epoch=0.0, clock=clock)
     editing_start = match_clock.editing_window(now_fn())
 
-    available = flow._demo_pool()[:6]
+    roster = Roster(flow._demo_pool()[:6])
 
     locks: list[int] = []
+    picks: list[str] = []
 
     def on_lock(window, preds, active_id, use_power):
+        # The screen reserved the player at lock time; do NOT spend it again here (see the 1H
+        # smoke's on_lock for the full rationale).
         locks.append(window)
+        picks.append(active_id)
         return build_window_report(
             window=window, predictions=preds, actuals={},
             stat_labels=stat_labels, success_value=0, concede_value=0,
@@ -327,7 +369,7 @@ def live_smoke_2h() -> int:
     screen = LivePlayScreen(
         app=app, feed=feed, feed_client=feed_client, match_clock=match_clock,
         fixture_id=1, editing_window_start=editing_start, on_lock=on_lock,
-        on_finished=on_finished, poll_seconds=poll_seconds, available=available,
+        on_finished=on_finished, poll_seconds=poll_seconds, roster=roster,
         half_label=second_half_label, resync_threshold_seconds=resync_threshold,
         now_fn=now_fn, sim=sim)
 
@@ -335,9 +377,9 @@ def live_smoke_2h() -> int:
     for step in range(0, 55):
         holder["t"] += 60.0                  # advance one in-half match minute
         abs_minute = half_min + int(holder["t"] // 60)   # absolute match minute
-        if abs_minute >= ft_minute:          # full-time snapshot arrives on the clock
-            feed.record(_relay_snapshot(ft_snap["stats"], abs_minute, "FT"),
-                        minute=abs_minute)
+        status = "FT" if abs_minute >= ft_minute else "2H"
+        feed.record(_relay_snapshot(stats_at(abs_minute), abs_minute, status),
+                    minute=abs_minute)
         screen._auto_pick()                  # lock all dials + pick an active player
         screen.update(0.0)
         if finished["done"]:
@@ -346,12 +388,15 @@ def live_smoke_2h() -> int:
     expected = list(range(editing_start, et_window + 1))
     in_order = locks == sorted(locks)
     locked_expected = locks == expected
-    if not (finished["done"] and in_order and locked_expected):
+    no_reuse = _no_reuse_before_recycle(picks, len(roster.all_athletes()))
+    if not (finished["done"] and in_order and locked_expected and no_reuse):
         ok = False
 
     print(("OK" if locked_expected else "FAIL"),
           "live 2H smoke: locked windows =", locks, "(expected", expected, ")")
     print(("OK" if in_order else "FAIL"), "live 2H smoke: windows locked in order")
+    print(("OK" if no_reuse else "FAIL"),
+          "live 2H smoke: no player re-used before recycle; picks =", picks)
     print(("OK" if finished["done"] else "FAIL"),
           "live 2H smoke: reached final screen (on_finished fired)")
     return 0 if ok else 1

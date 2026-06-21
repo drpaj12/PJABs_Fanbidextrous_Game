@@ -33,6 +33,7 @@ from src.ui.widgets import Button, PlayerDetail, ScrollButtons, athlete_card, fo
 from src.ui.sim import SimMode
 from src.game.prediction import Prediction
 from src.game.athlete import DraftedAthlete
+from src.game.roster import Roster
 from src.game.live_feed import LiveFeed
 from src.game.match_clock import MatchClock
 from src.game.half_clock import HalfClock
@@ -92,7 +93,7 @@ class LivePlayScreen(Screen):
                  editing_window_start: int,
                  on_lock: Callable[[int, list[Prediction], str, bool], WindowReport],
                  on_finished: Callable[[], None], poll_seconds: float,
-                 available: list[DraftedAthlete],
+                 roster: Roster,
                  half_label: str = "",
                  resync_threshold_seconds: float = 30.0,
                  now_fn: Callable[[], float] = time.time,
@@ -107,7 +108,7 @@ class LivePlayScreen(Screen):
         self.on_lock = on_lock
         self.on_finished = on_finished
         self.poll_seconds = poll_seconds
-        self.available = available
+        self.roster = roster
         self.half_label = half_label
         self._resync_threshold = resync_threshold_seconds
         self.now_fn = now_fn
@@ -123,7 +124,9 @@ class LivePlayScreen(Screen):
         self.use_power = False
         self.feedback = ""
         self.scroll = 0
-        self.zoom_idx: Optional[int] = None  # tapped player's detail panel, or None
+        # tapped player's detail panel (by identity, not index -- the pickable list shrinks
+        # as players are committed, so an index would dangle), or None when closed.
+        self.zoom_ath: Optional[DraftedAthlete] = None
 
         # -- locked windows (snapshots) + the latest resolved report (inline reveal) --
         # window -> (preds, active_id, use_power)
@@ -195,16 +198,34 @@ class LivePlayScreen(Screen):
         return [Prediction(s["code"], self.lines[s["code"]])
                 for s in _STATS if s["code"] in self.locked]
 
+    def _pickable(self) -> list[DraftedAthlete]:
+        """Players the player may pick for the current edit window: the roster's recycle-aware
+        available() and nothing else. A player is spent (and so drops out here) the instant the
+        window they were committed to LOCKS -- see _lock_window -- so a used player can never be
+        offered, and thus never re-sent to on_lock, until the roster recycles. This is the
+        single source of truth for the picker, hit-testing, and layout."""
+        return self.roster.available()
+
     def _reset_editor(self) -> None:
-        """Move to the next edit window: reset dials to defaults, keep the chosen player."""
+        """Move to the next edit window: reset dials to defaults AND clear the active player,
+        forcing a fresh, deliberate pick. Carrying the player over silently re-committed the
+        same athlete to consecutive windows, which the roster rejects on resolve (each player
+        is usable once until the roster recycles)."""
         self.lines = {s["code"]: s["default_line"] for s in _STATS}
         self.locked.clear()
         self.touched.clear()
+        self.active_id = None
+        self.zoom_ath = None
         self.feedback = ""
         self.scroll = 0
 
     def _lock_window(self, window: int) -> None:
         self._locked[window] = (self._current_preds(), self.active_id, self.use_power)
+        if self.active_id:
+            # Reserve the player on the rotation NOW, at assignment, so the recycle stays in
+            # lock-step with the picker even though scoring (on_lock) defers until the feed
+            # covers the window's end minute. available() drops the player immediately.
+            self.roster.use(self.active_id)
 
     def _resolve_window(self, window: int) -> None:
         preds, active_id, use_power = self._locked[window]
@@ -295,7 +316,7 @@ class LivePlayScreen(Screen):
         return self._y_cap_players() + LAYOUT.i("liveplay_section_gap", 30)
 
     def _y_locked_panel(self) -> int:
-        return (self._y_players() + len(self.available) * self._player_step()
+        return (self._y_players() + len(self._pickable()) * self._player_step()
                 + LAYOUT.i("liveplay_section_gap", 30))
 
     def _locked_line_count(self) -> int:
@@ -363,12 +384,12 @@ class LivePlayScreen(Screen):
         if self.sim and self.sim.is_key(event, pygame.K_a):
             self._auto_pick()
             return
-        if self.zoom_idx is not None:
+        if self.zoom_ath is not None:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.detail.select_btn.hit(event.pos):
-                    self.active_id = self.available[self.zoom_idx].athlete_id
+                    self.active_id = self.zoom_ath.athlete_id
                     self.feedback = ""
-                self.zoom_idx = None     # any tap (except a Select, above) closes
+                self.zoom_ath = None     # any tap (except a Select, above) closes
             return
         if event.type == pygame.MOUSEWHEEL:
             if self._viewport().collidepoint(pygame.mouse.get_pos()):
@@ -389,9 +410,9 @@ class LivePlayScreen(Screen):
             if r.collidepoint(event.pos):
                 self._tap_stat(s["code"], event.pos[0], r)
                 return
-        for j, ath in enumerate(self.available):
+        for j, ath in enumerate(self._pickable()):
             if self._player_rect(j).collidepoint(event.pos):
-                self.zoom_idx = j     # open the detail panel; Select there sets active
+                self.zoom_ath = ath   # open the detail panel; Select there sets active
                 return
 
     def _tap_stat(self, code: str, x: int, r: pygame.Rect) -> None:
@@ -417,8 +438,9 @@ class LivePlayScreen(Screen):
     def _auto_pick(self) -> None:
         self.locked = {s["code"] for s in _STATS}
         self.touched.clear()
-        if self.available:
-            self.active_id = self.available[0].athlete_id
+        pick = self._pickable()
+        if pick:
+            self.active_id = pick[0].athlete_id
 
     def _force_update(self) -> None:
         """Poll immediately. Followers read the cache, the lead triggers upstream -- the
@@ -467,12 +489,12 @@ class LivePlayScreen(Screen):
         self._draw_report(surface)
         surface.set_clip(prev)
 
-        if self.zoom_idx is None and self._max_scroll() > 0:
+        if self.zoom_ath is None and self._max_scroll() > 0:
             self.scroll_btns.draw(surface, self.scroll, self._max_scroll())
-        if self.zoom_idx is None:
+        if self.zoom_ath is None:
             self.update_btn.draw(surface, font(LAYOUT.i("liveplay_stat_size", 20)))
         else:
-            ath = self.available[self.zoom_idx]
+            ath = self.zoom_ath
             self.detail.select_btn.label = (
                 "Picked" if ath.athlete_id == self.active_id else "Pick player")
             self.detail.draw(surface, ath)
@@ -502,15 +524,24 @@ class LivePlayScreen(Screen):
             color = (_C["green"] if locked
                      else _C["orange"] if code in self.touched else _C["red"])
             pygame.draw.circle(surface, color, (r.x + 22, r.centery), cr)
-            surface.blit(sf.render(f"{s['label']}: {self.lines[code]}", True, _C["white"]),
-                         (r.x + 44, r.y + 14))
+            # Label on the left, clipped so a long name ("Shots on target") cannot bleed
+            # into the stepper cluster on the right. The predicted line value gets its own
+            # slot centered between the "-" and "+" steppers.
+            label_x = r.x + 44
+            label_clip = pygame.Rect(label_x, r.y, (r.right - 116) - label_x, r.height)
+            prev_clip = surface.get_clip()
+            surface.set_clip(label_clip.clip(prev_clip) if prev_clip else label_clip)
+            surface.blit(sf.render(s["label"], True, _C["white"]), (label_x, r.y + 14))
+            surface.set_clip(prev_clip)
             surface.blit(sf.render("-", True, _C["white"]), (r.right - 104, r.y + 12))
+            val = sf.render(str(self.lines[code]), True, _C["accent"])
+            surface.blit(val, val.get_rect(center=(r.right - 74, r.centery)))
             surface.blit(sf.render("+", True, _C["white"]), (r.right - 44, r.y + 12))
 
     def _draw_players(self, surface: pygame.Surface) -> None:
         vp = self._viewport()
         sf = font(LAYOUT.i("liveplay_stat_size", 20))
-        for j, ath in enumerate(self.available):
+        for j, ath in enumerate(self._pickable()):
             r = self._player_rect(j)
             if r.bottom < vp.top or r.top > vp.bottom:
                 continue

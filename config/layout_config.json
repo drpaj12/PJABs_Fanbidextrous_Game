@@ -12,6 +12,9 @@
   "ui_scroll_step": 90,
   "ui_scroll_gutter": 52,
 
+  "wall_clock_size": 14,
+  "wall_clock_margin": 6,
+
   "splash_title_size": 38,
   "splash_title_y": 300,
   "splash_tip_size": 20,

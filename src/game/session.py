@@ -59,9 +59,16 @@ class GameSession:
         return success, concede
 
     def resolve_window(self, window: int, predictions: list[Prediction],
-                       active_id: str, use_power: bool, actuals: dict[str, int]) -> WindowResolution:
+                       active_id: str, use_power: bool, actuals: dict[str, int],
+                       mark_used: bool = True) -> WindowResolution:
         active = self.roster.get(active_id)
-        self.roster.use(active_id)
+        if mark_used:
+            # Spend the player on the rotation here for the immediate predict->resolve flow.
+            # The live screen resolves a window LONG after the player committed to it (it waits
+            # for the feed to cover the window's end minute), so it reserves the player at lock
+            # time instead and passes mark_used=False -- otherwise the recycle would lag behind
+            # the picker and momentarily strand the player with no one left to pick.
+            self.roster.use(active_id)
 
         success = concede = 0
         for p in predictions:

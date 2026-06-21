@@ -262,13 +262,12 @@ class LiveFlow(Flow):
         now_now = time.time()
         match_clock = MatchClock(self.kickoff_epoch, self.clock)
         editing_start = match_clock.editing_window(now_now)
-        available = self.session.roster.available()
         self.app.set_screen(LivePlayScreen(
             app=self.app, feed=self.feed, feed_client=self.feed_client,
             match_clock=match_clock, fixture_id=self.fixture_id,
             editing_window_start=editing_start, on_lock=self._on_lock,
             on_finished=self._to_final, poll_seconds=_POLL_SECONDS,
-            available=available, half_label=self.half_label,
+            roster=self.session.roster, half_label=self.half_label,
             resync_threshold_seconds=_RESYNC_THRESHOLD,
             sim=self.sim, on_snapshot=self.on_snapshot))
 
@@ -291,9 +290,11 @@ class LiveFlow(Flow):
         """Bridge from the screen: resolve `window` against the live feed, append any score
         events, and return the report the screen renders inline (no cinematic screen)."""
         actuals = self._window_actuals_for(window)
+        # The live screen already reserved this player on the roster when the window locked,
+        # so resolution must not spend it again (mark_used=False).
         res = self.session.resolve_window(window=window, predictions=preds,
                                           active_id=active_id, use_power=use_power,
-                                          actuals=actuals)
+                                          actuals=actuals, mark_used=False)
         for ev in res.score_events:
             self.score_codes.append(ev.to_code())
         return build_window_report(
