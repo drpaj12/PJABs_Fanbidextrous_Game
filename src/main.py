@@ -4,6 +4,7 @@
   .venv/Scripts/python src/main.py                      # MockFeed demo (no SIM)
   .venv/Scripts/python src/main.py --simdemo            # MockFeed demo + SIM hotkeys
   .venv/Scripts/python src/main.py --sim <slug>         # recorded match + SIM hotkeys
+  .venv/Scripts/python src/main.py --dungeon            # dungeon crawl on test_sim recording
   .venv/Scripts/python src/main.py --live [fixture_id]  # LIVE match off the relay
   .venv/Scripts/python src/main.py --launcher           # web-style menu: live vs test game
   .venv/Scripts/python src/main.py --app                # full web entry: username -> menu
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.ui.app import App
 from src.ui import flow
+from src.utils.constants import CONFIG
 
 
 async def main() -> None:
@@ -41,6 +43,8 @@ async def main() -> None:
         else:
             # No id given -> show the match picker (config live.fixtures).
             flow.start_live_select(app, sim_mode=sim_live, is_lead=True)
+    elif "--dungeon" in sys.argv:
+        flow.start_dungeon_sim(app, CONFIG["launcher"]["test_sim"], sim_mode=True)
     elif "--simdemo" in sys.argv:
         flow.start(app, sim_mode=True)
     else:

@@ -38,7 +38,12 @@ from src.ui.screens.pregame_screen import PregameScreen
 from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
-from src.ui.screens.status_screens import FinalScreen, RevealScreen
+from src.ui.screens.status_screens import FinalScreen, RevealScreen, DungeonFinalScreen
+from src.ui.screens.shop_screen import ShopScreen
+from src.ui.screens.dungeon_play_screen import DungeonPlayScreen
+from src.game.crawl import CrawlSession
+from src.game.window_resolver import WindowResult
+from src.game.score import total_tiles_game
 from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.ui.screens.live_resolve_screen import LiveResolveScreen
 from src.ui.screens.live_play_screen import LivePlayScreen
@@ -72,6 +77,8 @@ _LAUNCHER = CONFIG["launcher"]
 _LEAD_NAME = CONFIG["client"]["lead_username"]
 _JOIN_CUTOFF = CONFIG["live"]["join_cutoff_minute"]
 _RESYNC_THRESHOLD = CONFIG["live"]["resync_threshold_seconds"]
+_WINDOWS_PER_HALF = CONFIG["game"]["windows_per_half"]
+_DUNGEON_PARTY_SIZE = CONFIG["game"]["dungeon_party_size"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -419,6 +426,87 @@ class LiveFlow(Flow):
             pass
 
 
+class DungeonSimFlow:
+    """Single-device cooperative dungeon crawl over a recorded match.
+
+    Splash -> Pre-game -> Shop(H1) -> 3 windows -> Shop(H2) -> 3 windows -> Final(% done).
+    Deterministic: one fixed RNG seed, no relay, no API. The pure CrawlSession owns all
+    economy / loadout / resolution; this flow only sequences screens and extracts the
+    per-window actuals from the feed."""
+
+    def __init__(self, app: "App", feed: ReplayFeed, pool: list[DraftedAthlete],
+                 sim: SimMode) -> None:
+        self.app = app
+        self.feed = feed
+        self.pool = pool
+        self.sim = sim
+        self.app.global_handler = sim.handle_global
+        self.app.overlay = sim.draw_overlay
+        self.session = CrawlSession(party_size=_DUNGEON_PARTY_SIZE, pool=pool,
+                                    rng=random.Random(_RNG_SEED))
+        self.window = 1
+
+    def start(self) -> None:
+        self.app.set_screen(SplashScreen(self.app, self._after_splash, self.sim))
+
+    def _after_splash(self) -> None:
+        self.app.set_screen(PregameScreen(self.app, self._fixture(), self._to_shop, self.sim))
+
+    def _fixture(self) -> dict:
+        meta = getattr(self.feed, "meta", {})
+        label = _HALF_LABEL if self.session.half == 1 else _SECOND_HALF_LABEL
+        return {
+            "home": meta.get("home_team", _PREGAME["default_home_team"]),
+            "away": meta.get("away_team", _PREGAME["default_away_team"]),
+            "competition": meta.get("title", _PREGAME["default_competition"]),
+            "label": label,
+        }
+
+    def _to_shop(self) -> None:
+        self.app.set_screen(ShopScreen(self.app, self.session, self._after_shop, self.sim))
+
+    def _after_shop(self) -> None:
+        self.window = 1
+        self._play_window()
+
+    def _label(self) -> str:
+        half_label = _HALF_LABEL if self.session.half == 1 else _SECOND_HALF_LABEL
+        return f"{half_label} -- Window {self.window}/{_WINDOWS_PER_HALF}"
+
+    def _play_window(self) -> None:
+        self.app.set_screen(DungeonPlayScreen(
+            self.app, self.session, self.feed, self.window, self._label(),
+            self._on_descend, self._on_continue, self.sim))
+
+    def _window_actuals(self) -> dict:
+        start = (self.session.half - 1) * _HALF_MIN + (self.window - 1) * _WINDOW_MIN
+        end = start + _WINDOW_MIN
+        a = self.feed.snapshot_at(start)
+        b = self.feed.snapshot_at(end)
+        from src.game.normalize_soccer import actuals_from_raw
+        raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
+        return actuals_from_raw(raw, _STATS_MENU)
+
+    def _on_descend(self, lines: dict) -> WindowResult:
+        return self.session.resolve_window([lines], self._window_actuals(), self._label())
+
+    def _on_continue(self) -> None:
+        if not self.session.half_over():
+            self.window += 1
+            self._play_window()
+        elif self.session.half == 1:
+            self.session.begin_second_half()
+            self._to_shop()
+        else:
+            self._to_final()
+
+    def _to_final(self) -> None:
+        self.app.set_screen(DungeonFinalScreen(
+            self.app, self.session.percent(), self.session.cleared_total(),
+            total_tiles_game(self.session.party_size),
+            on_continue=None, title=_FULLTIME_LABEL))
+
+
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
                is_lead: bool = False, username: str = "", kickoff_utc: str = "",
                home: str = "", away: str = "") -> None:
@@ -584,9 +672,13 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     def go_sim() -> None:
         start_simulation(app, _LAUNCHER["test_sim"], sim_mode=True)
 
+    def go_dungeon() -> None:
+        start_dungeon_sim(app, _LAUNCHER["test_sim"], sim_mode=True)
+
     options = [
         (_LAUNCHER["live_label"], go_live),
         (_LAUNCHER["sim_label"], go_sim),
+        (_LAUNCHER["dungeon_label"], go_dungeon),
     ]
     app.set_screen(LauncherScreen(app, options))
 
@@ -594,6 +686,11 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
 def start_simulation(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:
     feed = ReplayFeed.from_file(sim_rel_path)
     Flow(app, feed, _pool_from_feed(feed), SimMode(sim_mode)).start()
+
+
+def start_dungeon_sim(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:
+    feed = ReplayFeed.from_file(sim_rel_path)
+    DungeonSimFlow(app, feed, _pool_from_feed(feed), SimMode(sim_mode)).start()
 
 
 def start(app: "App", sim_mode: bool = False) -> None:
