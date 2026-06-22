@@ -20,6 +20,11 @@ class Roster:
     def available(self) -> list[DraftedAthlete]:
         return [a for a in self._athletes if a.athlete_id not in self._used_ids]
 
+    def used_ids(self) -> list[str]:
+        """The ids spent in the current rotation cycle (for save/resume). Sorted for a stable
+        serialization; order does not matter since use() rejects duplicates."""
+        return sorted(self._used_ids)
+
     def use(self, athlete_id: str) -> None:
         if athlete_id in self._used_ids:
             raise ValueError(f"athlete {athlete_id} already used this cycle")

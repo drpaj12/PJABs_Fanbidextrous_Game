@@ -99,7 +99,8 @@ class LivePlayScreen(Screen):
                  now_fn: Callable[[], float] = time.time,
                  sim: Optional[SimMode] = None,
                  on_snapshot: Optional[Callable[[dict], None]] = None,
-                 score_fn: Optional[Callable[[], tuple[int, int]]] = None) -> None:
+                 score_fn: Optional[Callable[[], tuple[int, int]]] = None,
+                 on_change: Optional[Callable[[], None]] = None) -> None:
         super().__init__(app)
         self.feed = feed
         self.feed_client = feed_client
@@ -118,6 +119,10 @@ class LivePlayScreen(Screen):
         # Returns the player's running (goals_for, goals_against) so the header can show
         # their own scoreline next to the real match score; None hides the player line.
         self.score_fn = score_fn
+        # Called (at most once per frame) after any state change so the flow can persist a
+        # resume blob. A coalescing dirty flag keeps it off the hot path -- see update().
+        self.on_change = on_change
+        self._dirty = False
 
         # -- editor state (the window the player is currently filling in) --
         self.edit_window = editing_window_start
@@ -185,6 +190,7 @@ class LivePlayScreen(Screen):
             if self.on_snapshot is not None:
                 self.on_snapshot(snapshot)
             self._error = ""
+            self._mark_dirty()   # feed advanced -> refresh the resume point on next frame
         except Exception as exc:                       # network/parse: keep retrying
             self._error = f"reconnecting ({type(exc).__name__})"
         finally:
@@ -230,12 +236,57 @@ class LivePlayScreen(Screen):
             # lock-step with the picker even though scoring (on_lock) defers until the feed
             # covers the window's end minute. available() drops the player immediately.
             self.roster.use(self.active_id)
+        self._mark_dirty()
 
     def _resolve_window(self, window: int) -> None:
         preds, active_id, use_power = self._locked[window]
         if not active_id:
             return  # no player chosen for that window -> nothing to score
         self.last_report = self.on_lock(window, preds, active_id, use_power)
+        self._mark_dirty()   # meters / score changed -> persist the new resume point
+
+    # -- resume (persist / restore editor + locked-window state) ------------
+    def _mark_dirty(self) -> None:
+        """Flag that state changed; update() coalesces this into one on_change() per frame."""
+        self._dirty = True
+
+    def snapshot_editor(self) -> dict:
+        """Plain-dict view of everything the screen owns for a resume: the in-progress editor
+        (dials, picked player), the locked-but-maybe-unresolved windows, and the progress
+        high-water marks. Session state (meters, score, rng) is added by the flow."""
+        return {
+            "editing_start": self.editing_start,
+            "edit_window": self.edit_window,
+            "lines": dict(self.lines),
+            "locked": sorted(self.locked),
+            "touched": sorted(self.touched),
+            "active_id": self.active_id,
+            "use_power": self.use_power,
+            "max_entered": self._max_entered,
+            "pending_resolve": sorted(self._pending_resolve),
+            "locked_windows": {
+                str(w): {"preds": [[p.stat_code, p.line] for p in preds],
+                         "active_id": aid, "use_power": up}
+                for w, (preds, aid, up) in self._locked.items()},
+        }
+
+    def restore_editor(self, state: dict) -> None:
+        """Apply a snapshot_editor() dict back onto a freshly built screen. Tolerant of missing
+        keys (a partial/older blob just keeps the constructor defaults for those fields)."""
+        defaults = {s["code"]: s["default_line"] for s in _STATS}
+        self.edit_window = int(state.get("edit_window", self.edit_window))
+        self.lines = {**defaults, **{k: int(v) for k, v in state.get("lines", {}).items()
+                                     if k in defaults}}
+        self.locked = set(state.get("locked", []))
+        self.touched = set(state.get("touched", []))
+        self.active_id = state.get("active_id")
+        self.use_power = bool(state.get("use_power", False))
+        self._max_entered = int(state.get("max_entered", self._max_entered))
+        self._pending_resolve = set(int(w) for w in state.get("pending_resolve", []))
+        self._locked = {
+            int(w): ([Prediction(c, int(l)) for c, l in d.get("preds", [])],
+                     d.get("active_id"), bool(d.get("use_power", False)))
+            for w, d in state.get("locked_windows", {}).items()}
 
     # -- per-frame logic ----------------------------------------------------
     def update(self, dt: float) -> None:
@@ -275,6 +326,13 @@ class LivePlayScreen(Screen):
         # Half over: resolve the final (ET) window if owned, then hand off to the flow.
         if self.feed.match_status() in (_HALFTIME_STATUS, _FINISHED_STATUS):
             self._handle_halftime()
+
+        # Persist a fresh resume point once per frame if anything changed (and the half is not
+        # over -- the flow clears the blob at half end so a finished half never re-resumes).
+        if self._dirty and not self._finished:
+            self._dirty = False
+            if self.on_change is not None:
+                self.on_change()
 
     def _drain_pending(self) -> None:
         for w in windows_ready(self._pending_resolve, self.feed.last_known_minute(),
@@ -391,6 +449,7 @@ class LivePlayScreen(Screen):
                 if self.detail.select_btn.hit(event.pos):
                     self.active_id = self.zoom_ath.athlete_id
                     self.feedback = ""
+                    self._mark_dirty()
                 self.zoom_ath = None     # any tap (except a Select, above) closes
             return
         if event.type == pygame.MOUSEWHEEL:
@@ -431,11 +490,13 @@ class LivePlayScreen(Screen):
                 self.locked.add(code)
                 self.touched.discard(code)
             self.feedback = ""
+        self._mark_dirty()
 
     def _arm(self, code: str) -> None:
         self.touched.add(code)
         self.locked.discard(code)
         self.feedback = ""
+        self._mark_dirty()
 
     def _auto_pick(self) -> None:
         self.locked = {s["code"] for s in _STATS}
@@ -443,6 +504,7 @@ class LivePlayScreen(Screen):
         pick = self._pickable()
         if pick:
             self.active_id = pick[0].athlete_id
+        self._mark_dirty()
 
     def _force_update(self) -> None:
         """Poll immediately. Followers read the cache, the lead triggers upstream -- the

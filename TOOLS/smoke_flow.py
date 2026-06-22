@@ -519,10 +519,88 @@ def resolve_smoke() -> int:
     return 0 if (match_ok and nomatch_ok) else 1
 
 
+def resume_smoke() -> int:
+    """Drive the LiveFlow resume path: build a saved blob (drafted hand, meters, score, RNG,
+    rotation, editor + locked windows), hand it to a fresh LiveFlow, and assert start() jumps
+    straight into a restored LivePlayScreen with every field intact (no draft). Also assert a
+    blob for the OTHER half is declined and the flow starts fresh. Returns 0 on OK."""
+    import random as _random
+    from src.ui.app import App
+    from src.ui import flow
+    from src.game.live_feed import LiveFeed
+    from src.game.half_clock import HalfClock
+    from src.game.live_resume import LiveResumeState, parse, rng_to_jsonable
+    from src.ui.sim import SimMode
+    from src.ui.screens.live_play_screen import LivePlayScreen
+    from src.ui.screens.splash import SplashScreen
+    from src.sync.feed_client import FeedClient
+    from src.utils.constants import CONFIG
+
+    half_min = CONFIG["game"]["half_minutes"]
+    window_min = CONFIG["game"]["window_seconds"] // 60
+
+    pool = flow._demo_pool()[:6]
+    selected = [a.athlete_id for a in pool]
+    editor = {
+        "editing_start": 2, "edit_window": 4,
+        "lines": {"corners": 3}, "locked": ["corners"], "touched": [],
+        "active_id": selected[2], "use_power": False,
+        "max_entered": 3, "pending_resolve": [],
+        "locked_windows": {
+            "2": {"preds": [["corners", 2]], "active_id": selected[0], "use_power": False},
+            "3": {"preds": [["shots", 1]], "active_id": selected[1], "use_power": False}},
+    }
+    blob = LiveResumeState(
+        fixture_id=1, half=1, selected_ids=selected,
+        used_ids=[selected[0], selected[1]], success_value=4, concede_value=2,
+        pending_next={"kind": "none", "value": 0.0},
+        rng_state=rng_to_jsonable(_random.Random(99).getstate()),
+        score_codes=["0:2:for:1"], editor=editor)
+
+    def build_flow(resume_blob) -> "flow.LiveFlow":
+        app = App()
+        feed = LiveFeed()
+        feed_client = FeedClient(CONFIG["relay"]["base_url"],
+                                 feed_path=CONFIG["relay"]["feed_path"], is_lead=True)
+        clock = HalfClock(half_min, window_min)
+        flw = flow.LiveFlow(app, feed, feed_client, 1, pool, 1, clock, 0.0,
+                            SimMode(False), to_picker=lambda: None,
+                            resume_blob=resume_blob)
+        flw.start()
+        return flw
+
+    # 1) A matching-half blob resumes straight into a restored LivePlayScreen.
+    flw = build_flow(parse(blob.to_json()))
+    cur = flw.app.current
+    restored = (isinstance(cur, LivePlayScreen) and cur.edit_window == 4
+                and cur.active_id == selected[2] and cur.locked == {"corners"}
+                and cur._max_entered == 3 and set(cur._locked) == {2, 3}
+                and flw.session is not None
+                and flw.session.success_meter.value == 4
+                and flw.session.concede_meter.value == 2
+                and set(flw.session.roster.used_ids()) == {selected[0], selected[1]}
+                and flw.score_codes == ["0:2:for:1"])
+
+    # 2) A blob for the OTHER half is declined -> fresh flow (starts at the splash screen).
+    import json as _json
+    d = blob.to_dict(); d["half"] = 2
+    flw2 = build_flow(parse(_json.dumps(d)))
+    fell_back = isinstance(flw2.app.current, SplashScreen)
+
+    ok = restored and fell_back
+    print(("OK" if restored else "FAIL"),
+          "resume smoke: restored live screen (edit_window=4, player + meters + score intact)")
+    print(("OK" if fell_back else "FAIL"),
+          "resume smoke: wrong-half blob declined -> fresh start (SplashScreen)")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     rc_offline = main()
     rc_live = live_smoke()
     rc_live_2h = live_smoke_2h()
     rc_schedule = schedule_smoke()
     rc_resolve = resolve_smoke()
-    raise SystemExit(rc_offline or rc_live or rc_live_2h or rc_schedule or rc_resolve)
+    rc_resume = resume_smoke()
+    raise SystemExit(rc_offline or rc_live or rc_live_2h or rc_schedule
+                     or rc_resolve or rc_resume)

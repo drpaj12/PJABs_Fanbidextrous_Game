@@ -27,6 +27,7 @@ from src.game.half_picker import pick_half
 from src.game.kickoff import seconds_to_kickoff
 from src.game.window_report import WindowReport, build_window_report
 from src.game import feed_cache_policy as cachep
+from src.game import live_resume
 from src.sync.feed_client import FeedClient
 from src.sync.highscore_client import HighscoreClient
 from src.sync.local_store import LocalStore
@@ -238,7 +239,10 @@ class LiveFlow(Flow):
                  clock: HalfClock, kickoff_epoch: float, sim: SimMode,
                  to_picker: Callable[[], None], on_snapshot=None,
                  username: str = "", game_label: str = "",
-                 highscore_client: Optional[HighscoreClient] = None) -> None:
+                 highscore_client: Optional[HighscoreClient] = None,
+                 resume_blob: Optional["live_resume.LiveResumeState"] = None,
+                 on_resume_save: Optional[Callable[[str], None]] = None,
+                 on_resume_clear: Optional[Callable[[], None]] = None) -> None:
         super().__init__(app, feed, pool, sim)
         self.feed_client = feed_client
         self.fixture_id = fixture_id
@@ -251,6 +255,11 @@ class LiveFlow(Flow):
         self.username = username
         self.game_label = game_label             # e.g. "Netherlands v Sweden"
         self.highscore_client = highscore_client
+        self.resume_blob = resume_blob           # set when re-entering a half in progress
+        self.on_resume_save = on_resume_save
+        self.on_resume_clear = on_resume_clear
+        self.selected_ids: list[str] = []        # the drafted six, for the resume blob
+        self.live_screen: Optional[LivePlayScreen] = None
 
     def _fixture(self) -> dict:
         return {
@@ -260,16 +269,58 @@ class LiveFlow(Flow):
             "label": self.half_label,
         }
 
+    def start(self) -> None:
+        """Resume jumps straight back into the live screen (no splash/room/pregame/draft);
+        a fresh half runs the normal Flow sequence ending in _after_draft."""
+        if self.resume_blob is not None:
+            self._resume_play()
+        else:
+            super().start()
+
     def _after_draft(self, selected: list[str]) -> None:
         # Build the session from the drafted hand (as Flow does), then hand the whole half
         # to the unified live screen instead of stepping window-by-window.
+        self.selected_ids = list(selected)
         hand = [a for a in self.pool if a.athlete_id in selected]
         self.session = GameSession(slot=0, roster=Roster(hand), pool=self.pool,
                                    rng=random.Random(_RNG_SEED))
-        now_now = time.time()
         match_clock = MatchClock(self.kickoff_epoch, self.clock)
-        editing_start = match_clock.editing_window(now_now)
-        self.app.set_screen(LivePlayScreen(
+        editing_start = match_clock.editing_window(time.time())
+        self._show_live_screen(match_clock, editing_start, restore=None)
+
+    def _resume_play(self) -> None:
+        """Rebuild the half from a saved blob: the same drafted hand, meters, score, RNG and
+        rotation state, then the screen's editor + locked windows. Falls back to a fresh draft
+        if anything is off (lineups not loaded, player vanished) so resume can never dead-end."""
+        blob = self.resume_blob
+        roster_ids = {a.athlete_id for a in self.pool}
+        if blob is None or not live_resume.can_restore(blob, self.half, roster_ids):
+            self.resume_blob = None
+            super().start()
+            return
+        self.selected_ids = list(blob.selected_ids)
+        hand = [a for a in self.pool if a.athlete_id in blob.selected_ids]
+        self.session = GameSession(slot=0, roster=Roster(hand), pool=self.pool,
+                                   rng=random.Random(_RNG_SEED))
+        self.session.success_meter.value = blob.success_value
+        self.session.concede_meter.value = blob.concede_value
+        self.session._pending_next = dict(blob.pending_next)
+        try:
+            self.session.rng.setstate(live_resume.rng_from_jsonable(blob.rng_state))
+        except (ValueError, TypeError, IndexError):
+            pass   # keep the freshly seeded RNG if the saved state is unusable
+        self.score_codes = list(blob.score_codes)
+        for aid in blob.used_ids:
+            if aid in roster_ids:
+                self.session.roster.use(aid)
+        match_clock = MatchClock(self.kickoff_epoch, self.clock)
+        editing_start = int(blob.editor.get("editing_start",
+                                            match_clock.editing_window(time.time())))
+        self._show_live_screen(match_clock, editing_start, restore=blob.editor)
+
+    def _show_live_screen(self, match_clock: MatchClock, editing_start: int,
+                          restore: Optional[dict]) -> None:
+        screen = LivePlayScreen(
             app=self.app, feed=self.feed, feed_client=self.feed_client,
             match_clock=match_clock, fixture_id=self.fixture_id,
             editing_window_start=editing_start, on_lock=self._on_lock,
@@ -277,7 +328,33 @@ class LiveFlow(Flow):
             roster=self.session.roster, half_label=self.half_label,
             resync_threshold_seconds=_RESYNC_THRESHOLD,
             sim=self.sim, on_snapshot=self.on_snapshot,
-            score_fn=lambda: aggregate(self.score_codes)))
+            score_fn=lambda: aggregate(self.score_codes),
+            on_change=self._save_resume)
+        if restore:
+            screen.restore_editor(restore)
+        self.live_screen = screen
+        self.app.set_screen(screen)
+
+    def _save_resume(self) -> None:
+        """Persist a resume point. Fully guarded -- a serialization or storage failure must
+        never interrupt play."""
+        if (self.on_resume_save is None or self.session is None
+                or self.live_screen is None):
+            return
+        try:
+            blob = live_resume.LiveResumeState(
+                fixture_id=self.fixture_id, half=self.half,
+                selected_ids=list(self.selected_ids),
+                used_ids=self.session.roster.used_ids(),
+                success_value=self.session.success_meter.value,
+                concede_value=self.session.concede_meter.value,
+                pending_next=dict(self.session._pending_next),
+                rng_state=live_resume.rng_to_jsonable(self.session.rng.getstate()),
+                score_codes=list(self.score_codes),
+                editor=self.live_screen.snapshot_editor())
+            self.on_resume_save(blob.to_json())
+        except Exception:
+            pass
 
     def _window_actuals_for(self, window: int) -> dict[str, int]:
         """Actuals (per-stat deltas) for one window. A live Extra-Time window resolves over
@@ -318,8 +395,16 @@ class LiveFlow(Flow):
         team, opp = aggregate(self.score_codes)
         title = _FULLTIME_LABEL if self.half == 2 else _HALFTIME_LABEL
         self._submit_highscore(team, opp)
+        self._clear_resume()   # half finished -> never resume into a completed half
         self.app.set_screen(FinalScreen(self.app, team, opp, None,
                                         on_continue=self.to_picker, title=title))
+
+    def _clear_resume(self) -> None:
+        if self.on_resume_clear is not None:
+            try:
+                self.on_resume_clear()
+            except Exception:
+                pass
 
     def _submit_highscore(self, goals_for: int, goals_against: int) -> None:
         """Fire-and-forget the player's final scoreline to the public board as the half ends.
@@ -406,10 +491,24 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
                 return
             pool = _pool_from_feed(feed)
             game_label = f"{feed.home_team() or home} v {feed.away_team() or away}".strip()
+
+            # Resume: load any saved point for this user+fixture+half; save on every change and
+            # clear it when the half ends. Keyed per half so the two halves never clobber.
+            rkey = live_resume.resume_key(username, real_id, half)
+            resume_blob = live_resume.parse(store.get(rkey))
+
+            def save_resume(blob_json: str) -> None:
+                store.set(rkey, blob_json)
+
+            def clear_resume() -> None:
+                store.set(rkey, "")
+
             LiveFlow(app, feed, feed_client, real_id, pool, half, clock,
                      kickoff_epoch, sim, to_picker, on_snapshot=persist,
                      username=username, game_label=game_label,
-                     highscore_client=highscore_client).start()
+                     highscore_client=highscore_client,
+                     resume_blob=resume_blob, on_resume_save=save_resume,
+                     on_resume_clear=clear_resume).start()
 
         def begin() -> None:
             choice = pick_half(feed.status_short(), feed.current_minute(),
