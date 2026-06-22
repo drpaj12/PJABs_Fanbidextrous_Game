@@ -1,6 +1,7 @@
 # src/game/dungeon.py
 """Linear dungeon depth track: party state, gate spacing, monster difficulty, and a single
 seeded gate dice resolution. All randomness comes from the injected rng (random.Random)."""
+import random
 from dataclasses import dataclass
 
 from src.game.score import total_tiles_half
@@ -47,7 +48,7 @@ class GateOutcome:
     wound: bool
 
 
-def resolve_gate(rng, weapon_bonus: int, armor_soak: int, power: int, half: int,
+def resolve_gate(rng: random.Random, weapon_bonus: int, armor_soak: int, power: int, half: int,
                  party_size: int, threat: int, consumable_value: int = 0,
                  reroll: bool = False) -> GateOutcome:
     """Roll d(dice_sides) + weapon + Power*roll_bonus + consumable vs monster difficulty.

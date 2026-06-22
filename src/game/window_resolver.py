@@ -2,6 +2,7 @@
 """Leader-authoritative resolution of one 15-minute window: grade every fighter's predictions
 into bands -> tile advance, accrue Power from goal predictions, walk the party along the tile
 track resolving any monster gate crossed, and award gold. Pure: rng is injected."""
+import random
 from dataclasses import dataclass, field
 
 from src.game.bands import grade_progress, window_color
@@ -35,7 +36,7 @@ class WindowResult:
     finished: bool = False
 
 
-def resolve_window(rng, state: DungeonState, gear: PartyGear, fighter_lines: list,
+def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fighter_lines: list,
                    actuals: dict, window_label: str) -> WindowResult:
     log: list = []
     tiles = 0
