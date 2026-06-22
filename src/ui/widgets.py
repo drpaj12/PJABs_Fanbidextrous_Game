@@ -259,3 +259,28 @@ class PlayerDetail:
             y += gap
 
         self.select_btn.draw(surface, bf)
+
+
+def draw_depth_meter(surface: pygame.Surface, rect: pygame.Rect, depth: int,
+                     total: int, gate_step: int, color_key: str) -> None:
+    """A pip track of `total` cells inside `rect`. Cells 0..depth-1 fill in colors[color_key];
+    the rest are dim. Every `gate_step`-th boundary cell is outlined in gold. A 'depth/total'
+    caption renders just above the track."""
+    cap_h = LAYOUT.i("depth_label_size", 14) + 4
+    lf = font(LAYOUT.i("depth_label_size", 14))
+    surface.blit(lf.render(f"Depth {depth}/{total}", True, _C["text_dim"]),
+                 (rect.x, rect.y))
+    track = pygame.Rect(rect.x, rect.y + cap_h, rect.width,
+                        LAYOUT.i("depth_meter_h", 26))
+    gap = LAYOUT.i("depth_pip_gap", 3)
+    n = max(1, total)
+    cell_w = max(2, (track.width - (n - 1) * gap) // n)
+    fill = _C.get(color_key, _C["orange"])
+    for i in range(n):
+        x = track.x + i * (cell_w + gap)
+        cell = pygame.Rect(x, track.y, cell_w, track.height)
+        is_gate = gate_step > 0 and (i + 1) % gate_step == 0
+        pygame.draw.rect(surface, fill if i < depth else _C["surface"], cell,
+                         border_radius=3)
+        if is_gate:
+            pygame.draw.rect(surface, _C["gold"], cell, width=2, border_radius=3)
