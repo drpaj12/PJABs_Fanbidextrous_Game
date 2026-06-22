@@ -21,7 +21,9 @@
   },
   "game": {
     "roster_size": 6,
-    "window_seconds": 300,
+    "window_seconds": 900,
+    "windows_per_half": 3,
+    "loadout_size": 6,
     "max_predictions_per_window": 5,
     "rng_seed": 99,
     "half_minutes": 45,
@@ -30,6 +32,45 @@
     "halftime_label": "Half Time",
     "fulltime_label": "Full Time",
     "extra_time_label": "Extra Time"
+  },
+  "bands": {
+    "_comment": "Progress-stat accuracy bands by absolute error; step = tiles advanced.",
+    "order": ["exact", "close", "near", "off", "big_miss"],
+    "exact":    {"max_diff": 0,   "step": 3,  "label": "EXACT"},
+    "close":    {"max_diff": 1,   "step": 2,  "label": "CLOSE"},
+    "near":     {"max_diff": 2,   "step": 1,  "label": "NEAR"},
+    "off":      {"max_diff": 4,   "step": 0,  "label": "OFF"},
+    "big_miss": {"max_diff": 999, "step": -1, "label": "BIG MISS"},
+    "window_color": {"green_min": 8, "red_max": 2}
+  },
+  "power": {
+    "_comment": "Goal prediction grants persistent Power; never for a predicted line below min_predicted.",
+    "exact_gain": 2,
+    "close_gain": 1,
+    "close_max_diff": 1,
+    "min_predicted": 1,
+    "roll_bonus_per_power": 1,
+    "gold_bonus_per_power": 0.10
+  },
+  "dungeon": {
+    "tiles_per_fighter_half1": 12,
+    "tiles_per_fighter_half2": 16,
+    "gate_every_tiles_half1": 8,
+    "gate_every_tiles_half2": 6,
+    "monster_base_difficulty_half1": 6,
+    "monster_base_difficulty_half2": 8,
+    "monster_difficulty_per_fighter": 1,
+    "monster_difficulty_per_threat": 1,
+    "dice_sides": 6,
+    "max_wounds": 3,
+    "tiles_lost_per_unsoaked_point": 1
+  },
+  "economy": {
+    "base_treasury_per_fighter": 300,
+    "gold_per_tile": 5,
+    "gold_depth_bonus_per_gate": 3,
+    "gate_loot": 50,
+    "second_half_price_multiplier": 1.5
   },
   "scoring": {
     "exact_credit": 2,

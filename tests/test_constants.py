@@ -4,7 +4,7 @@ from src.utils.constants import CONFIG, load_data
 
 def test_config_has_game_section():
     assert CONFIG["game"]["roster_size"] == 6
-    assert CONFIG["game"]["window_seconds"] == 300
+    assert CONFIG["game"]["window_seconds"] == 900
 
 
 def test_load_data_reads_powers():

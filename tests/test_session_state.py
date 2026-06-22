@@ -3,10 +3,10 @@ from src.sync.session_state import SessionState
 
 def test_window_for_minute_uses_window_seconds():
     st = SessionState(room=0, token="t", seed=123, slot=0)
-    # window_seconds=300 -> 5-min windows; minute 0-4 -> window 1, 5-9 -> window 2
+    # window_seconds=900 -> 15-min windows; minute 0-14 -> window 1, 15-29 -> window 2
     assert st.window_for_minute(0) == 1
-    assert st.window_for_minute(4) == 1
-    assert st.window_for_minute(5) == 2
+    assert st.window_for_minute(14) == 1
+    assert st.window_for_minute(15) == 2
 
 
 def test_record_and_aggregate_score_events():
