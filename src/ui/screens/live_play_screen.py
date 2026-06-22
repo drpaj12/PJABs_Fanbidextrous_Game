@@ -98,7 +98,8 @@ class LivePlayScreen(Screen):
                  resync_threshold_seconds: float = 30.0,
                  now_fn: Callable[[], float] = time.time,
                  sim: Optional[SimMode] = None,
-                 on_snapshot: Optional[Callable[[dict], None]] = None) -> None:
+                 on_snapshot: Optional[Callable[[dict], None]] = None,
+                 score_fn: Optional[Callable[[], tuple[int, int]]] = None) -> None:
         super().__init__(app)
         self.feed = feed
         self.feed_client = feed_client
@@ -114,6 +115,9 @@ class LivePlayScreen(Screen):
         self.now_fn = now_fn
         self.sim = sim
         self.on_snapshot = on_snapshot
+        # Returns the player's running (goals_for, goals_against) so the header can show
+        # their own scoreline next to the real match score; None hides the player line.
+        self.score_fn = score_fn
 
         # -- editor state (the window the player is currently filling in) --
         self.edit_window = editing_window_start
@@ -320,12 +324,10 @@ class LivePlayScreen(Screen):
                 + LAYOUT.i("liveplay_section_gap", 30))
 
     def _locked_line_count(self) -> int:
-        # one title line + one line per locked window (predictions summarised on it)
-        return 1 + len(self._locked)
+        # title line + the current (in-progress) window line + one line per locked window
+        return 2 + len(self._locked)
 
     def _locked_panel_h(self) -> int:
-        if not self._locked:
-            return 0
         pad = LAYOUT.i("liveplay_panel_pad", 12)
         gap = LAYOUT.i("liveplay_panel_line_gap", 22)
         return pad * 2 + self._locked_line_count() * gap
@@ -462,11 +464,22 @@ class LivePlayScreen(Screen):
         surface.blit(cf.render(f"{self.mc.display_minute(now)}'", True, _C["accent"]),
                      (m, LAYOUT.i("liveplay_clock_y", 44)))
         sf = font(LAYOUT.i("liveplay_score_size", 17))
-        score = f"{self.feed.home_team()} v {self.feed.away_team()}".strip(" v")
         status = self.feed.match_status()
-        info = f"{score}  {status}".strip() if score else status
-        surface.blit(sf.render(info, True, _C["text_dim"]),
+        # Real match scoreline: "Home 1-0 Away  live". Falls back to just the status pre-poll.
+        home, away = self.feed.home_team(), self.feed.away_team()
+        if home or away:
+            real = (f"{home} {self.feed.home_goals()}-{self.feed.away_goals()} {away}"
+                    f"  {status}").strip()
+        else:
+            real = status
+        surface.blit(sf.render(real, True, _C["text_dim"]),
                      (m + 70, LAYOUT.i("liveplay_score_y", 50)))
+        # Player's own scoreline (goals predicted into existence vs conceded), accent-coloured
+        # so it reads as "your game", separate from the real match score above.
+        if self.score_fn is not None:
+            gf, ga = self.score_fn()
+            surface.blit(sf.render(f"You {gf}-{ga}", True, _C["accent"]),
+                         (m + 70, LAYOUT.i("liveplay_score2_y", 72)))
         if self.feedback:
             ff = font(LAYOUT.i("liveplay_hint_size", 15))
             surface.blit(ff.render(self.feedback, True, _C["red"]),
@@ -549,8 +562,6 @@ class LivePlayScreen(Screen):
                          ath.stars, ath.athlete_id == self.active_id)
 
     def _draw_locked_panel(self, surface: pygame.Surface) -> None:
-        if not self._locked:
-            return
         panel = self._locked_panel_rect()
         vp = self._viewport()
         if panel.bottom < vp.top or panel.top > vp.bottom:
@@ -563,8 +574,17 @@ class LivePlayScreen(Screen):
         lf = font(LAYOUT.i("liveplay_panel_line_size", 15))
         x = panel.x + pad
         y = panel.y + pad
-        surface.blit(tf.render("Locked windows", True, _C["accent"]), (x, y))
-        # newest-first; each stat's line number shown above its code (e.g. "goal 1")
+        surface.blit(tf.render("Windows", True, _C["accent"]), (x, y))
+        # Current (in-progress) window first, drawn WHITE + underlined so the player can see
+        # at a glance which round they are predicting right now.
+        y += gap
+        cur_picks = "  ".join(f"{p.stat_code} {p.line}"
+                              for p in self._current_preds()) or "(setting...)"
+        cur_surf = lf.render(f"W{self.edit_window}: {cur_picks}", True, _C["white"])
+        surface.blit(cur_surf, (x, y))
+        ul_y = y + cur_surf.get_height() + 1
+        pygame.draw.line(surface, _C["white"], (x, ul_y), (x + cur_surf.get_width(), ul_y), 1)
+        # Locked windows, newest-first; dimmed when no player was assigned.
         for w in sorted(self._locked, reverse=True):
             y += gap
             preds, active_id, _ = self._locked[w]

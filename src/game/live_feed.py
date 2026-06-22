@@ -23,6 +23,8 @@ class LiveFeed:
         self._elapsed: int = 0
         self._home_team: str = ""
         self._away_team: str = ""
+        self._home_goals: int = 0
+        self._away_goals: int = 0
         self._kickoff_iso: Optional[str] = None
         if snapshot is not None:
             self.record(snapshot)
@@ -48,6 +50,11 @@ class LiveFeed:
             self._home_team = home_name
         if away_name:
             self._away_team = away_name
+        goals = fixture.get("goals") or {}
+        if goals.get("home") is not None:
+            self._home_goals = int(goals.get("home") or 0)
+        if goals.get("away") is not None:
+            self._away_goals = int(goals.get("away") or 0)
         lineups = snapshot.get("lineups") or {}
         if lineups.get("response"):
             self._lineups_raw = lineups
@@ -110,6 +117,15 @@ class LiveFeed:
     def away_team(self) -> str:
         """Away team name from the fixture payload (empty until first poll)."""
         return self._away_team
+
+    def home_goals(self) -> int:
+        """Live home-team goals from the fixture score (0 until first poll). Paired with
+        away_goals() to show the real match scoreline alongside the player's own score."""
+        return self._home_goals
+
+    def away_goals(self) -> int:
+        """Live away-team goals from the fixture score (0 until first poll)."""
+        return self._away_goals
 
     def kickoff_iso(self) -> Optional[str]:
         """Scheduled kickoff timestamp (ISO 8601) from the fixture payload, or None until

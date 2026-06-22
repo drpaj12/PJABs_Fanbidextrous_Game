@@ -7,6 +7,7 @@ window that resolves over all first-half stoppage, discovered by polling the fee
 a half-time status. The engine is untouched; meter before/after values are captured
 around resolve_window to drive the cinematic.
 """
+import asyncio
 import random
 import time
 from typing import TYPE_CHECKING, Callable, Optional
@@ -27,6 +28,7 @@ from src.game.kickoff import seconds_to_kickoff
 from src.game.window_report import WindowReport, build_window_report
 from src.game import feed_cache_policy as cachep
 from src.sync.feed_client import FeedClient
+from src.sync.highscore_client import HighscoreClient
 from src.sync.local_store import LocalStore
 from src.ui.sim import SimMode
 from src.ui.screens.splash import SplashScreen
@@ -234,7 +236,9 @@ class LiveFlow(Flow):
     def __init__(self, app: "App", feed: LiveFeed, feed_client: FeedClient,
                  fixture_id: int, pool: list[DraftedAthlete], half: int,
                  clock: HalfClock, kickoff_epoch: float, sim: SimMode,
-                 to_picker: Callable[[], None], on_snapshot=None) -> None:
+                 to_picker: Callable[[], None], on_snapshot=None,
+                 username: str = "", game_label: str = "",
+                 highscore_client: Optional[HighscoreClient] = None) -> None:
         super().__init__(app, feed, pool, sim)
         self.feed_client = feed_client
         self.fixture_id = fixture_id
@@ -244,6 +248,9 @@ class LiveFlow(Flow):
         self.to_picker = to_picker
         self.half_label = _SECOND_HALF_LABEL if half == 2 else _HALF_LABEL
         self.on_snapshot = on_snapshot
+        self.username = username
+        self.game_label = game_label             # e.g. "Netherlands v Sweden"
+        self.highscore_client = highscore_client
 
     def _fixture(self) -> dict:
         return {
@@ -269,7 +276,8 @@ class LiveFlow(Flow):
             on_finished=self._to_final, poll_seconds=_POLL_SECONDS,
             roster=self.session.roster, half_label=self.half_label,
             resync_threshold_seconds=_RESYNC_THRESHOLD,
-            sim=self.sim, on_snapshot=self.on_snapshot))
+            sim=self.sim, on_snapshot=self.on_snapshot,
+            score_fn=lambda: aggregate(self.score_codes)))
 
     def _window_actuals_for(self, window: int) -> dict[str, int]:
         """Actuals (per-stat deltas) for one window. A live Extra-Time window resolves over
@@ -309,8 +317,21 @@ class LiveFlow(Flow):
     def _to_final(self) -> None:
         team, opp = aggregate(self.score_codes)
         title = _FULLTIME_LABEL if self.half == 2 else _HALFTIME_LABEL
+        self._submit_highscore(team, opp)
         self.app.set_screen(FinalScreen(self.app, team, opp, None,
                                         on_continue=self.to_picker, title=title))
+
+    def _submit_highscore(self, goals_for: int, goals_against: int) -> None:
+        """Fire-and-forget the player's final scoreline to the public board as the half ends.
+        Fully guarded: a relay/network/event-loop failure here must NEVER block the transition
+        to the FinalScreen, so every failure mode is swallowed."""
+        if self.highscore_client is None or not self.username or not self.game_label:
+            return
+        try:
+            asyncio.ensure_future(self.highscore_client.submit(
+                self.game_label, self.username, goals_for, goals_against))
+        except Exception:
+            pass
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
@@ -342,6 +363,8 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
                              feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead,
                              live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
+    highscore_client = HighscoreClient(CONFIG["relay"]["base_url"],
+                                       path=CONFIG["relay"]["highscore_path"])
     sim = SimMode(sim_mode)
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
@@ -382,8 +405,11 @@ def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
                 no_half_left()
                 return
             pool = _pool_from_feed(feed)
+            game_label = f"{feed.home_team() or home} v {feed.away_team() or away}".strip()
             LiveFlow(app, feed, feed_client, real_id, pool, half, clock,
-                     kickoff_epoch, sim, to_picker, on_snapshot=persist).start()
+                     kickoff_epoch, sim, to_picker, on_snapshot=persist,
+                     username=username, game_label=game_label,
+                     highscore_client=highscore_client).start()
 
         def begin() -> None:
             choice = pick_half(feed.status_short(), feed.current_minute(),

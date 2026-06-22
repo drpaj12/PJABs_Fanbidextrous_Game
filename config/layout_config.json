@@ -82,6 +82,7 @@
   "liveplay_clock_y": 44,
   "liveplay_score_size": 17,
   "liveplay_score_y": 50,
+  "liveplay_score2_y": 72,
   "liveplay_content_top": 132,
   "liveplay_section_size": 17,
   "liveplay_section_gap": 30,

@@ -46,6 +46,19 @@ def test_goals_come_from_fixture_score():
     assert feed.snapshot_at(20).stats["goals"] == 2
 
 
+def test_home_and_away_goals_tracked_separately():
+    feed = LiveFeed(_snap("2H", 70, 8, 9, 5, 2, 1))
+    assert feed.home_goals() == 2
+    assert feed.away_goals() == 1
+    assert feed.snapshot_at(70).stats["goals"] == 3   # combined still available
+
+
+def test_goals_default_to_zero_before_any_poll():
+    feed = LiveFeed()
+    assert feed.home_goals() == 0
+    assert feed.away_goals() == 0
+
+
 def test_window_delta_between_minutes():
     feed = LiveFeed()
     feed.record(_snap("1H", 20, 4, 4, 2, 1, 0))
