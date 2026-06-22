@@ -87,3 +87,42 @@ class FinalScreen(Screen):
             rf = font(LAYOUT.i("ui_small_size", 17))
             r = rf.render(self.real_line, True, _C["text_dim"])
             surface.blit(r, r.get_rect(center=(sw // 2, 370)))
+
+
+class DungeonFinalScreen(Screen):
+    """End of a dungeon run: the party's percent-completed score, big and centered."""
+
+    def __init__(self, app: "App", percent: int, depth: int, total: int,
+                 on_continue: Optional[Callable[..., None]] = None,
+                 title: str = "Crawl Complete") -> None:
+        super().__init__(app)
+        self.percent = percent
+        self.depth = depth
+        self.total = total
+        self.on_continue = on_continue
+        self.title = title
+
+    def handle(self, event: pygame.event.Event) -> None:
+        if self.on_continue and event.type == pygame.MOUSEBUTTONDOWN:
+            self.on_continue()
+
+    def update(self, dt: float) -> None: ...
+
+    def draw(self, surface: pygame.Surface) -> None:
+        from src.utils.constants import LAYOUT
+        from src.ui.widgets import font
+        sw = surface.get_width()
+        tf = font(LAYOUT.i("dfinal_title_size", 40))
+        t = tf.render(self.title, True, _C["white"])
+        surface.blit(t, t.get_rect(center=(sw // 2, 200)))
+        pf = font(LAYOUT.i("dfinal_pct_size", 56))
+        p = pf.render(f"{self.percent}%", True, _C["accent"])
+        surface.blit(p, p.get_rect(center=(sw // 2, 320)))
+        sf = font(LAYOUT.i("dfinal_sub_size", 20))
+        s = sf.render(f"dungeon completed -- depth {self.depth} of {self.total}",
+                      True, _C["text_dim"])
+        surface.blit(s, s.get_rect(center=(sw // 2, 400)))
+        if self.on_continue:
+            hf = font(LAYOUT.i("dfinal_hint_size", 16))
+            h = hf.render("tap to continue", True, _C["text_dim"])
+            surface.blit(h, h.get_rect(center=(sw // 2, surface.get_height() - 60)))
