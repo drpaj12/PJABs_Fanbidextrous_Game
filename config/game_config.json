@@ -24,6 +24,7 @@
     "window_seconds": 900,
     "windows_per_half": 3,
     "loadout_size": 6,
+    "dungeon_party_size": 1,
     "max_predictions_per_window": 5,
     "rng_seed": 99,
     "half_minutes": 45,
@@ -140,11 +141,13 @@
     "_comment": "Web entry menu: Live match (real fixtures + relay) vs an offline simulated test game. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
     "live_label": "Live match",
     "sim_label": "Test game (simulated)",
+    "dungeon_label": "Dungeon crawl (simulated)",
     "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json"
   },
   "assets": {
     "data_dir": "assets/data",
     "image_dir": "assets/images",
+    "icon_subdir": "icons",
     "sound_dir": "assets/sounds",
     "powers_file": "assets/data/powers.json",
     "stats_menu_file": "assets/data/stats_menu.json"
