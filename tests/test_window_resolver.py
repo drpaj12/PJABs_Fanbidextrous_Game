@@ -1,6 +1,6 @@
 # tests/test_window_resolver.py
 from src.game.dungeon import DungeonState
-from src.game.window_resolver import PartyGear, resolve_window
+from src.game.window_resolver import STAT_CODES, PartyGear, resolve_window
 
 
 class SeqRng:
@@ -45,6 +45,37 @@ def test_big_miss_forces_red_and_raises_threat():
     assert res.color == "red"
     assert st.threat == 1
     assert res.power_gained == 0                    # predicted 0 goals -> no power
+
+
+def test_stat_results_carry_per_prediction_outcomes_in_canonical_order():
+    st = DungeonState(half=1, party_size=1)
+    gear = PartyGear(weapon_bonus=5, armor_soak=0)
+    rng = SeqRng([6])
+    # goal exact (2==2 -> green), shot big miss (99 vs 3 -> red), corner near (4 vs 2 -> orange)
+    lines = {"goal": 2, "shot": 99, "corner": 4, "card": 1, "foul": 4}
+    res = resolve_window(rng, st, gear, [lines], ACTUALS, "W1")
+    assert [sr.code for sr in res.stat_results] == STAT_CODES
+    by = {sr.code: sr for sr in res.stat_results}
+    assert by["goal"].predicted == 2 and by["goal"].actual == 2 and by["goal"].color_key == "green"
+    assert by["shot"].color_key == "red"            # big miss
+    assert by["corner"].color_key == "orange"       # near/off, not exact, not big miss
+    assert by["card"].color_key == "green" and by["foul"].color_key == "green"
+    assert res.actuals == {c: ACTUALS[c] for c in STAT_CODES}
+
+
+def test_resolve_emits_colored_prediction_log_lines():
+    st = DungeonState(half=1, party_size=1)
+    gear = PartyGear(weapon_bonus=5, armor_soak=0)
+    rng = SeqRng([6])
+    res = resolve_window(rng, st, gear, [_exact_lines(2)], ACTUALS, "W1")
+    pred_lines = [ln for ln in res.log if ln.strip().startswith("PRED")]
+    assert len(pred_lines) == len(STAT_CODES)
+    assert all("(GREEN)" in ln for ln in pred_lines)  # all exact
+    # PRED lines sit between the advance line and the DEPTH progression line
+    advance_i = next(i for i, ln in enumerate(res.log) if "party advance" in ln)
+    depth_i = next(i for i, ln in enumerate(res.log) if ln.strip().startswith("DEPTH"))
+    first_pred_i = next(i for i, ln in enumerate(res.log) if ln.strip().startswith("PRED"))
+    assert advance_i < first_pred_i < depth_i
 
 
 def test_gate_fail_costs_tiles_and_wound():

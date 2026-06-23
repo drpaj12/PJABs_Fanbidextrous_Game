@@ -5,14 +5,40 @@ track resolving any monster gate crossed, and award gold. Pure: rng is injected.
 import random
 from dataclasses import dataclass, field
 
-from src.game.bands import grade_progress, window_color
+from src.game.bands import Band, grade_progress, window_color
 from src.game.dungeon import DungeonState, gate_step, resolve_gate
 from src.game.power import power_gain
 from src.game.treasury import gate_loot_gold, tile_gold
-from src.utils.constants import CONFIG
+from src.utils.constants import CONFIG, load_data
 
 _PROGRESS = ["shot", "corner", "card", "foul"]
 _MAX_WOUNDS = int(CONFIG["dungeon"]["max_wounds"])
+
+# Canonical stat order + labels (goal first, then the four progress stats). Pure data,
+# no pygame -- used to build the per-prediction outcomes the UI underlines/colors.
+_STATS_MENU = load_data(CONFIG["assets"]["stats_menu_file"])["stats"]
+STAT_CODES: list[str] = [s["code"] for s in _STATS_MENU]
+_STAT_LABELS: dict[str, str] = {s["code"]: s["label"] for s in _STATS_MENU}
+
+
+def _color_key(band: Band) -> str:
+    """Map an accuracy band to the three feedback colors used in the play screens."""
+    if band.key in ("exact", "close"):
+        return "green"
+    if band.is_big_miss:
+        return "red"
+    return "orange"
+
+
+@dataclass(frozen=True)
+class StatResult:
+    """One prediction's outcome for the underline/color strip + the mixed log."""
+    code: str
+    label: str
+    predicted: int
+    actual: int
+    band_label: str
+    color_key: str
 
 
 @dataclass
@@ -34,6 +60,8 @@ class WindowResult:
     gates: list = field(default_factory=list)
     log: list = field(default_factory=list)
     finished: bool = False
+    stat_results: list = field(default_factory=list)
+    actuals: dict = field(default_factory=dict)
 
 
 def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fighter_lines: list,
@@ -55,7 +83,24 @@ def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fig
     if has_big_miss:
         state.threat += 1
     color = window_color(tiles, has_big_miss)
+
+    # Per-prediction outcomes for the FIRST fighter's lines, in canonical stat order.
+    # Goal is graded for display only (its tile/power effect is unchanged above).
+    first_lines = fighter_lines[0] if fighter_lines else {}
+    used_actuals = {code: int(actuals.get(code, 0)) for code in STAT_CODES}
+    stat_results: list = []
+    for code in STAT_CODES:
+        predicted = int(first_lines.get(code, 0))
+        actual = used_actuals[code]
+        band = grade_progress(predicted, actual)
+        stat_results.append(StatResult(code=code, label=_STAT_LABELS[code],
+                                        predicted=predicted, actual=actual,
+                                        band_label=band.label, color_key=_color_key(band)))
+
     log.append(f"{window_label}  party advance +{tiles} ({color.upper()})")
+    for sr in stat_results:
+        log.append(f"  PRED   {sr.label} {sr.predicted} vs {sr.actual} -> "
+                   f"{sr.band_label} ({sr.color_key.upper()})")
     if power_gained:
         log.append(f"  POWER  goal -> +{power_gained} Power (now {state.power})")
 
@@ -105,4 +150,5 @@ def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fig
 
     log.append(f"  DEPTH  {state.depth}/{state.total_tiles}")
     return WindowResult(tiles_advanced=tiles, power_gained=power_gained, color=color,
-                        gold=gold, gates=gates, log=log, finished=state.finished)
+                        gold=gold, gates=gates, log=log, finished=state.finished,
+                        stat_results=stat_results, actuals=used_actuals)
