@@ -44,10 +44,15 @@ async def main() -> None:
             # No id given -> show the match picker (config live.fixtures).
             flow.start_live_select(app, sim_mode=sim_live, is_lead=True)
     elif "--party" in sys.argv:
-        flow.start_dungeon_party(app, "drpaj", CONFIG["launcher"]["test_sim"],
-                                 sim_mode="--sim" in sys.argv)
+        party_sim = "--sim" in sys.argv
+        flow.start_sim_select(
+            app,
+            lambda path: flow.start_dungeon_party(app, "drpaj", path, sim_mode=party_sim),
+            sim_mode=party_sim)
     elif "--dungeon" in sys.argv:
-        flow.start_dungeon_sim(app, CONFIG["launcher"]["test_sim"], sim_mode=True)
+        flow.start_sim_select(
+            app, lambda path: flow.start_dungeon_sim(app, path, sim_mode=True),
+            sim_mode=True)
     elif "--simdemo" in sys.argv:
         flow.start(app, sim_mode=True)
     else:

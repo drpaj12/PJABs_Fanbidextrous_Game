@@ -138,12 +138,12 @@ Also added the predict-phase `monster_flavor()` text render here (deferred from 
 - Modify: `src/ui/flow.py` (show it between halves in `DungeonSimFlow._on_continue` and `DungeonPartyFlow._advance_then_shop`)
 - Verify: headless construct smoke + party smokes
 
-- [ ] **Step 1:** Add `DungeonHalfScreen(app, percent, depth, total, members, log_tail, on_continue, title)` to `status_screens.py`. Render: title (e.g. `_HALFTIME_LABEL`), big `percent%`, `depth/total`, a per-player list `username — gold` (from `members` = list of (username, treasury)), and the last few crawl-log lines (`log_tail`). A Continue button -> `on_continue()`.
-- [ ] **Step 2 (SIM wiring):** In `DungeonSimFlow._on_continue`, when half 1 ends, show `DungeonHalfScreen` first; its Continue calls `begin_second_half()` + `_to_shop()`. Use single-device members `[(username, session.treasury)]`.
-- [ ] **Step 3 (party wiring):** In `DungeonPartyFlow._advance_then_shop`, after `leader_advance_half()`/`refresh()` build the screen from `coord.view()` (`percent`, `depth`, `total`, `members`, `log` tail). Continue calls `_reanchor_half_two()` + `_to_shop()`. Leader and follower both see it; only the leader advanced state.
-- [ ] **Step 4:** Headless construct smoke for `DungeonHalfScreen`. Re-run `TOOLS/smoke_party.py` and `TOOLS/smoke_party_live.py` — both must still print OK (the extra screen must not break the half transition; the smokes drive Continue).
-- [ ] **Step 5:** `.venv/Scripts/python -m pytest tests/ -q`; confirm `--dungeon` and `--party` launch and show the recap at halftime.
-- [ ] **Step 6:** `log.md`; commit.
+- [x] **Step 1:** Add `DungeonHalfScreen(app, percent, depth, total, members, log_tail, on_continue, title)` to `status_screens.py`. Render: title (e.g. `_HALFTIME_LABEL`), big `percent%`, `depth/total`, a per-player list `username — gold` (from `members` = list of (username, treasury)), and the last few crawl-log lines (`log_tail`). A Continue button -> `on_continue()`.
+- [x] **Step 2 (SIM wiring):** In `DungeonSimFlow._on_continue`, when half 1 ends, show `DungeonHalfScreen` first; its Continue calls `begin_second_half()` + `_to_shop()`. Use single-device members `[(username, session.treasury)]`.
+- [x] **Step 3 (party wiring):** In `DungeonPartyFlow._advance_then_shop`, after `leader_advance_half()`/`refresh()` build the screen from `coord.view()` (`percent`, `depth`, `total`, `members`, `log` tail). Continue calls `_reanchor_half_two()` + `_to_shop()`. Leader and follower both see it; only the leader advanced state. (DEVIATION: `_reanchor_half_two()` runs in `_advance_then_shop` before the recap is shown; the recap's Continue calls `_to_shop` directly — functionally equivalent ordering.)
+- [x] **Step 4:** Headless construct smoke for `DungeonHalfScreen`. Re-run `TOOLS/smoke_party.py` and `TOOLS/smoke_party_live.py` — both must still print OK (the extra screen must not break the half transition; the smokes drive Continue).
+- [x] **Step 5:** `.venv/Scripts/python -m pytest tests/ -q`; confirm `--dungeon` and `--party` launch and show the recap at halftime.
+- [x] **Step 6:** `log.md`; commit.
 
 **Two-stage review (crux):** spec compliance, then code quality (flow transition is the risk).
 
@@ -160,9 +160,9 @@ Also added the predict-phase `monster_flavor()` text render here (deferred from 
 - [x] **Step 1 (config):** Add `"monsters": {"half1_name": "goblins", "half2_name": "ogres"}` under `dungeon`.
 - [x] **Step 2 (failing test):** In `tests/test_dungeon.py` test `monster_flavor(half=1, party_size=3, threat=0)` returns a dict `{"total": T, "yours": Y, "name": "goblins", "text": "..."}` where `total == monster_difficulty(1, 3, 0)` and `yours == max(1, round(total / party_size))`, and `text` reads like `"Your party is engaging {total} {name}, you will fight {yours} of them."` Run, expect FAIL.
 - [x] **Step 3 (helper):** Implement pure `monster_flavor(half, party_size, threat)` in `dungeon.py` using `monster_difficulty` for `total`, `name` from config by half, `yours = max(1, round(total / party_size))`, and the ASCII `text` string.
-- [ ] **Step 4 (UI):** In both play screens' predict phase, render `monster_flavor(...).text` (party uses `coord.half()`/party size; single-device uses the session). Wrap with `wrap_text` so it fits 414px.
-- [ ] **Step 5:** Run tests + full suite; confirm `--dungeon`/`--party` show the flavor line in the predict phase.
-- [ ] **Step 6:** `log.md`; commit.
+- [x] **Step 4 (UI):** In both play screens' predict phase, render `monster_flavor(...).text` (party uses `coord.half()`/party size; single-device uses the session). Wrap with `wrap_text` so it fits 414px. (Shipped within the Task 5 commit.)
+- [x] **Step 5:** Run tests + full suite; confirm `--dungeon`/`--party` show the flavor line in the predict phase.
+- [x] **Step 6:** `log.md`; commit.
 
 ---
 
@@ -180,10 +180,10 @@ The user approved the plan and added four refinements. Tasks 3/4/5 absorb the fi
 - Modify: `src/ui/screens/dungeon_play_screen.py`, `src/ui/screens/party_play_screen.py`
 - Modify: `config/game_config.json` only if a label is needed
 
-- [ ] **Step 1:** Add a top banner on both play screens showing: the actual match scoreline `HOME g - g AWAY`, the match minute/status, and the real wall-clock time of day (HH:MM). Dungeon (single-device) reads score/minute from its `feed`/session match meta (the existing `_match_line` already derives home/away/goals/minute — extend it). Party reads from `coord.view()["match"]` (home, away, home_goals, away_goals, minute, status).
-- [ ] **Step 2:** Wall clock: use `time.strftime("%H:%M")` (pygbag-safe; NOT `Date.now()`-style). Place it in the banner. In sim modes where there is no real match, still show the simulated minute + score; the wall clock is real time of day either way.
-- [ ] **Step 3:** Headless construct smoke: both screens draw the banner with a stub match dict, no traceback, score + minute + a HH:MM clock string present.
-- [ ] **Step 4:** `pytest`; confirm `--dungeon`/`--party` show the banner. `log.md`; commit.
+- [x] **Step 1:** Add a top banner on both play screens showing: the actual match scoreline `HOME g - g AWAY`, the match minute/status, and the real wall-clock time of day (HH:MM). Dungeon (single-device) reads score/minute from its `feed`/session match meta (the existing `_match_line` already derives home/away/goals/minute — extend it). Party reads from `coord.view()["match"]` (home, away, home_goals, away_goals, minute, status).
+- [x] **Step 2:** Wall clock: use `time.strftime("%H:%M")` (pygbag-safe; NOT `Date.now()`-style). Place it in the banner. In sim modes where there is no real match, still show the simulated minute + score; the wall clock is real time of day either way.
+- [x] **Step 3:** Headless construct smoke: both screens draw the banner with a stub match dict, no traceback, score + minute + a HH:MM clock string present.
+- [x] **Step 4:** `pytest`; confirm `--dungeon`/`--party` show the banner. `log.md`; commit.
 
 ### Task 9: Game picker in ALL modes
 

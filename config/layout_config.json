@@ -150,6 +150,16 @@
   "fixsel_chip_size": 18,
   "fixsel_card_title_max": 26,
 
+  "simsel_title_size": 30,
+  "simsel_title_y": 150,
+  "simsel_list_top": 210,
+  "simsel_list_bottom_pad": 60,
+  "simsel_card_h": 84,
+  "simsel_card_gap": 10,
+  "simsel_card_title_size": 22,
+  "simsel_card_sub_size": 16,
+  "simsel_card_title_max": 30,
+
   "shop_list_top": 116,
   "shop_row_h": 64,
   "shop_row_gap": 8,

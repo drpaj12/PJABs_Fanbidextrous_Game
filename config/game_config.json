@@ -156,7 +156,8 @@
     "dungeon_label": "Dungeon crawl (simulated)",
     "party_label": "Dungeon party (online)",
     "party_live_label": "Dungeon party (live match)",
-    "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json"
+    "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json",
+    "simulations_dir": "assets/data/simulations"
   },
   "assets": {
     "data_dir": "assets/data",

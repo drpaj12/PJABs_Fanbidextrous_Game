@@ -49,10 +49,12 @@ from src.ui.screens.live_wait_screen import LiveWaitScreen
 from src.ui.screens.live_resolve_screen import LiveResolveScreen
 from src.ui.screens.live_play_screen import LivePlayScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
+from src.ui.screens.sim_game_select_screen import SimGameSelectScreen
+from src.game.simulations import list_simulations
 from src.game.schedule import load_schedule
 from src.ui.screens.launcher_screen import LauncherScreen
 from src.ui.screens.username_screen import UsernameScreen
-from src.utils.constants import CONFIG, load_data
+from src.utils.constants import CONFIG, ROOT, load_data
 from src.ui.screens.party_screen import PartyScreen
 from src.ui.screens.party_lobby_screen import PartyLobbyScreen
 from src.ui.screens.party_play_screen import PartyPlayScreen
@@ -86,6 +88,7 @@ _JOIN_CUTOFF = CONFIG["live"]["join_cutoff_minute"]
 _RESYNC_THRESHOLD = CONFIG["live"]["resync_threshold_seconds"]
 _WINDOWS_PER_HALF = CONFIG["game"]["windows_per_half"]
 _DUNGEON_PARTY_SIZE = CONFIG["game"]["dungeon_party_size"]
+_SIMS_DIR = _LAUNCHER["simulations_dir"]
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -1103,13 +1106,17 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
         start_live_select(app, sim_mode=sim_mode, is_lead=is_lead, username=username)
 
     def go_sim() -> None:
-        start_simulation(app, _LAUNCHER["test_sim"], sim_mode=True)
+        start_sim_select(app, lambda path: start_simulation(app, path, sim_mode=True),
+                         sim_mode=sim_mode)
 
     def go_dungeon() -> None:
-        start_dungeon_sim(app, _LAUNCHER["test_sim"], sim_mode=True)
+        start_sim_select(app, lambda path: start_dungeon_sim(app, path, sim_mode=True),
+                         sim_mode=sim_mode)
 
     def go_party() -> None:
-        start_dungeon_party(app, username, _LAUNCHER["test_sim"], sim_mode=sim_mode)
+        start_sim_select(app, lambda path: start_dungeon_party(app, username, path,
+                                                               sim_mode=sim_mode),
+                         sim_mode=sim_mode)
 
     def go_party_live() -> None:
         start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode)
@@ -1123,6 +1130,19 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
         (_LAUNCHER["sim_label"], go_sim),
     ]
     app.set_screen(LauncherScreen(app, options))
+
+
+def start_sim_select(app: "App", on_pick: Callable[[str], None],
+                     sim_mode: bool = True) -> None:
+    """Show the recorded-simulation picker, then run on_pick(rel_path) for the chosen game.
+    Every offline mode (test game, dungeon crawl, dungeon party) begins here so all modes
+    start with a game list. SIM auto-picks the first game so headless/demo paths keep moving.
+    A missing/empty simulations dir yields an empty-state screen, never a crash."""
+    sim = SimMode(sim_mode)
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+    games = list_simulations(ROOT, _SIMS_DIR)
+    app.set_screen(SimGameSelectScreen(app, games, on_pick, sim))
 
 
 def start_simulation(app: "App", sim_rel_path: str, sim_mode: bool = True) -> None:
