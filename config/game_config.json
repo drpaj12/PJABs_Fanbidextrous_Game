@@ -102,6 +102,13 @@
     "_comment": "The lead client (username match is case-insensitive) is the ONLY client that triggers upstream API-Football fetches; all other clients read the shared website cache. This bounds the day's quota to one client's poll rate no matter how many people join.",
     "lead_username": "drpaj"
   },
+  "party": {
+    "_comment": "Cooperative dungeon party (Plan 2). max_size 1-3 fighters; max_rooms party numbers 0..N-1; poll_seconds is how often a client re-reads the canonical party blob from the relay; per_player_treasury is each player's own starting gold pot.",
+    "max_size": 3,
+    "max_rooms": 4,
+    "poll_seconds": 3,
+    "per_player_treasury": 300
+  },
   "pregame": {
     "start_button_label": "Start First Half",
     "default_home_team": "Canada",
@@ -142,6 +149,8 @@
     "live_label": "Live match",
     "sim_label": "Test game (simulated)",
     "dungeon_label": "Dungeon crawl (simulated)",
+    "party_label": "Dungeon party (online)",
+    "party_live_label": "Dungeon party (live match)",
     "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json"
   },
   "assets": {
