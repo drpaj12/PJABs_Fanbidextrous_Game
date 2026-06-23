@@ -68,7 +68,8 @@
     "monsters": {
       "half1_name": "goblins",
       "half2_name": "ogres"
-    }
+    },
+    "recap_log_lines": 5
   },
   "economy": {
     "base_treasury_per_fighter": 300,

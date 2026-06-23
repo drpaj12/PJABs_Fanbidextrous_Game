@@ -38,7 +38,8 @@ from src.ui.screens.pregame_screen import PregameScreen
 from src.ui.screens.draft_screen import DraftScreen
 from src.ui.screens.play_screen import PlayScreen
 from src.ui.screens.cinematic_screen import CinematicScreen
-from src.ui.screens.status_screens import FinalScreen, RevealScreen, DungeonFinalScreen
+from src.ui.screens.status_screens import (FinalScreen, RevealScreen, DungeonFinalScreen,
+                                            DungeonHalfScreen)
 from src.ui.screens.shop_screen import ShopScreen
 from src.ui.screens.dungeon_play_screen import DungeonPlayScreen
 from src.game.crawl import CrawlSession
@@ -76,6 +77,7 @@ _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
 _POLL_SECONDS = CONFIG["feed"]["poll_seconds"]
 _RESOLVE_POLL_SECONDS = CONFIG["feed"]["live_resolve_poll_seconds"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
+_RECAP_LOG_LINES = int(CONFIG["dungeon"]["recap_log_lines"])
 _PREGAME = CONFIG["pregame"]
 _LIVE = CONFIG["live"]
 _LAUNCHER = CONFIG["launcher"]
@@ -507,10 +509,20 @@ class DungeonSimFlow:
             self.window += 1
             self._play_window()
         elif self.session.half == 1:
-            self.session.begin_second_half()
-            self._to_shop()
+            self._to_half_recap()
         else:
             self._to_final()
+
+    def _to_half_recap(self) -> None:
+        """End-of-H1 recap, then Continue begins the second half and re-enters the shop."""
+        def go() -> None:
+            self.session.begin_second_half()
+            self._to_shop()
+        total = total_tiles_game(self.session.party_size)
+        self.app.set_screen(DungeonHalfScreen(
+            self.app, self.session.percent(), self.session.cleared_total(), total,
+            [("You", self.session.treasury)], self.session.log[-_RECAP_LOG_LINES:],
+            on_continue=go, title=_HALFTIME_LABEL, sim=self.sim))
 
     def _to_final(self) -> None:
         self.app.set_screen(DungeonFinalScreen(
@@ -763,7 +775,16 @@ class DungeonPartyFlow:
         else:
             await self.coord.refresh()
         self._reanchor_half_two()
-        self._to_shop()
+        self._to_half_recap()
+
+    def _to_half_recap(self) -> None:
+        """End-of-H1 party recap (leader and follower both see it). Continue enters the H2 shop.
+        State was already advanced by the leader in _advance_then_shop; this only sequences UI."""
+        v = self.coord.view()
+        self.app.set_screen(DungeonHalfScreen(
+            self.app, v["percent"], v["depth"], v["total"], v["members"],
+            v["log"][-_RECAP_LOG_LINES:], on_continue=self._to_shop,
+            title=_HALFTIME_LABEL, sim=self.sim))
 
     def _reanchor_half_two(self) -> None:
         """LIVE half 2: re-anchor the clock to absolute minutes 45-90 and re-estimate the
