@@ -52,6 +52,11 @@ from src.game.schedule import load_schedule
 from src.ui.screens.launcher_screen import LauncherScreen
 from src.ui.screens.username_screen import UsernameScreen
 from src.utils.constants import CONFIG, load_data
+from src.ui.screens.party_screen import PartyScreen
+from src.ui.screens.party_lobby_screen import PartyLobbyScreen
+from src.ui.screens.party_play_screen import PartyPlayScreen
+from src.sync.relay_client import RelayClient
+from src.sync.party_coordinator import PartyCoordinator
 
 if TYPE_CHECKING:
     from src.ui.app import App
@@ -507,6 +512,124 @@ class DungeonSimFlow:
             on_continue=None, title=_FULLTIME_LABEL))
 
 
+class DungeonPartyFlow:
+    """Online cooperative crawl. The leader holds the authoritative CrawlSession inside the
+    PartyCoordinator; followers poll and render. SIM mode runs over a recorded feed with manual
+    window advance (deterministic, testable). LIVE mode (attach_live + start_dungeon_party_live)
+    runs over the real feed on the match clock; that wiring reuses this flow's steps."""
+
+    def __init__(self, app: "App", feed: ReplayFeed, pool: list[DraftedAthlete],
+                 coord: PartyCoordinator, sim: SimMode) -> None:
+        self.app = app
+        self.feed = feed
+        self.pool = pool
+        self.coord = coord
+        self.sim = sim
+        self.app.global_handler = sim.handle_global
+        self.app.overlay = sim.draw_overlay
+        self.window = 1
+        self._local_shop = None
+        self.live = False
+
+    def start(self) -> None:
+        self.app.set_screen(SplashScreen(self.app, self._to_lobby, self.sim))
+
+    def _to_lobby(self) -> None:
+        self.app.set_screen(PartyLobbyScreen(
+            self.app, self.coord, on_start=self._leader_start, on_advance=self._to_shop,
+            start_label="Start crawl", sim=self.sim))
+
+    def _leader_start(self) -> None:
+        asyncio.ensure_future(self.coord.leader_start())
+
+    def _to_shop(self) -> None:
+        budget = max(1, self.coord.shop_budget())
+        local = CrawlSession(party_size=1, pool=self.pool, rng=random.Random(_RNG_SEED),
+                             half=self.coord.half(), treasury=budget)
+        self._local_shop = local
+        self.app.set_screen(ShopScreen(self.app, local, self._after_shop, self.sim))
+
+    def _after_shop(self) -> None:
+        item_ids = [it.item_id for it in self._local_shop.loadouts[0].items]
+        asyncio.ensure_future(self._submit_loadout_then_wait(item_ids,
+                                                             self._local_shop.treasury))
+
+    async def _submit_loadout_then_wait(self, item_ids: list, treasury: int) -> None:
+        await self.coord.submit_loadout(item_ids, treasury)
+        await self.coord.refresh()
+        if self.coord.is_leader:
+            await self.coord.leader_try_reconcile_shop()
+        self.window = 1
+        self._play_window()
+
+    def _label(self) -> str:
+        half_label = _HALF_LABEL if self.coord.half() == 1 else _SECOND_HALF_LABEL
+        return f"{half_label} -- Window {self.window}/{_WINDOWS_PER_HALF}"
+
+    def _play_window(self) -> None:
+        self.app.set_screen(PartyPlayScreen(self.app, self.coord, self.window, self._label(),
+                                            self._on_continue, require_all=True, sim=self.sim))
+
+    def actuals_for(self, window: int) -> dict:
+        start = (self.coord.half() - 1) * _HALF_MIN + (window - 1) * _WINDOW_MIN
+        end = start + _WINDOW_MIN
+        a = self.feed.snapshot_at(start)
+        b = self.feed.snapshot_at(end)
+        from src.game.normalize_soccer import actuals_from_raw
+        raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
+        return actuals_from_raw(raw, _STATS_MENU)
+
+    def _on_continue(self) -> None:
+        if self.window < _WINDOWS_PER_HALF:
+            self.window += 1
+            self._play_window()
+        elif self.coord.half() == 1:
+            asyncio.ensure_future(self._advance_then_shop())
+        else:
+            asyncio.ensure_future(self._advance_then_finish())
+
+    async def _advance_then_shop(self) -> None:
+        if self.coord.is_leader:
+            await self.coord.leader_advance_half()
+        else:
+            await self.coord.refresh()
+        self._to_shop()
+
+    async def _advance_then_finish(self) -> None:
+        if self.coord.is_leader:
+            await self.coord.leader_advance_half()
+        else:
+            await self.coord.refresh()
+        v = self.coord.view()
+        self.app.set_screen(DungeonFinalScreen(self.app, v["percent"], v["depth"], v["total"],
+                                               on_continue=None, title=_FULLTIME_LABEL))
+
+
+def start_dungeon_party(app: "App", username: str, sim_rel_path: str,
+                        sim_mode: bool = True) -> None:
+    """SIM cooperative party: a recorded match drives deterministic per-window actuals on
+    every client; windows advance manually. The username (from UsernameScreen) is the party
+    credential. LIVE entry is start_dungeon_party_live (Task 14)."""
+    feed = ReplayFeed.from_file(sim_rel_path)
+    pool = _pool_from_feed(feed)
+    sim = SimMode(sim_mode)
+    relay = RelayClient(CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
+
+    def picked(party_number: int) -> None:
+        coord = PartyCoordinator(relay=relay, party_id=party_number, username=username,
+                                 pool=pool, actuals_fn=lambda w: flow.actuals_for(w))
+        flow = DungeonPartyFlow(app, feed, pool, coord, sim)
+
+        async def go() -> None:
+            await coord.join()
+            flow.start()
+        asyncio.ensure_future(go())
+
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+    app.set_screen(PartyScreen(app, username, picked, sim))
+
+
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
                is_lead: bool = False, username: str = "", kickoff_utc: str = "",
                home: str = "", away: str = "") -> None:
@@ -675,10 +798,14 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     def go_dungeon() -> None:
         start_dungeon_sim(app, _LAUNCHER["test_sim"], sim_mode=True)
 
+    def go_party() -> None:
+        start_dungeon_party(app, username, _LAUNCHER["test_sim"], sim_mode=sim_mode)
+
     options = [
         (_LAUNCHER["live_label"], go_live),
         (_LAUNCHER["sim_label"], go_sim),
         (_LAUNCHER["dungeon_label"], go_dungeon),
+        (_LAUNCHER["party_label"], go_party),
     ]
     app.set_screen(LauncherScreen(app, options))
 
