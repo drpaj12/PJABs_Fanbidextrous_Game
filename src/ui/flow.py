@@ -551,6 +551,14 @@ class DungeonPartyFlow:
 
     # -- LIVE mode wiring (Task 14) -----------------------------------------
 
+    def _match_summary(self) -> dict:
+        """Build the match-summary dict shared into the party blob from the live feed."""
+        return {"home": self.live_feed.home_team(), "away": self.live_feed.away_team(),
+                "home_goals": self.live_feed.home_goals(),
+                "away_goals": self.live_feed.away_goals(),
+                "minute": self.live_feed.current_minute(),
+                "status": self.live_feed.status_short()}
+
     def attach_live(self, feed_client: FeedClient, live_feed: LiveFeed,
                     fixture_id: int, clock: HalfClock) -> None:
         """LIVE mode: the leader fetches the feed and shares match/pool; the match clock
@@ -598,19 +606,15 @@ class DungeonPartyFlow:
         try:
             snap = await self.feed_client.get_feed(self.fixture_id)
             self.live_feed.record(snap)
+            match = self._match_summary()
+            pool_rows = None
+            if not self.coord.party.pool and self.live_feed.has_lineups():
+                pool_rows = self.live_feed.lineups()
+            await self.coord.leader_share_match(match, pool_rows=pool_rows,
+                                                fixture_id=self.fixture_id,
+                                                kickoff_iso=self.live_feed.kickoff_iso() or "")
         except Exception:
             return
-        match = {"home": self.live_feed.home_team(), "away": self.live_feed.away_team(),
-                 "home_goals": self.live_feed.home_goals(),
-                 "away_goals": self.live_feed.away_goals(),
-                 "minute": self.live_feed.current_minute(),
-                 "status": self.live_feed.status_short()}
-        pool_rows = None
-        if not self.coord.party.pool and self.live_feed.has_lineups():
-            pool_rows = self.live_feed.lineups()
-        await self.coord.leader_share_match(match, pool_rows=pool_rows,
-                                            fixture_id=self.fixture_id,
-                                            kickoff_iso=self.live_feed.kickoff_iso() or "")
 
     def live_actuals_for(self, window: int) -> dict:
         """Actuals (per-stat deltas) from the live feed for one window. A live Extra-Time
@@ -648,11 +652,7 @@ class DungeonPartyFlow:
         can build its draft pool and shop catalog from the shared rows. SIM has no feed to
         share and goes straight to leader_start."""
         if self.live and self.live_feed is not None and self.live_feed.has_lineups():
-            match = {"home": self.live_feed.home_team(), "away": self.live_feed.away_team(),
-                     "home_goals": self.live_feed.home_goals(),
-                     "away_goals": self.live_feed.away_goals(),
-                     "minute": self.live_feed.current_minute(),
-                     "status": self.live_feed.status_short()}
+            match = self._match_summary()
             await self.coord.leader_share_match(
                 match, pool_rows=self.live_feed.lineups(), fixture_id=self.fixture_id,
                 kickoff_iso=self.live_feed.kickoff_iso() or "")
@@ -725,17 +725,19 @@ class DungeonPartyFlow:
     async def _live_poll(self) -> None:
         """Per-poll LIVE hook (leader fetch+share, then clock-boundary check). Runs inside
         PartyPlayScreen's poll loop. Guarded so a network/clock failure never crashes play."""
+        # leader_poll_feed self-guards its full network path (fetch/record/share); the guard
+        # here protects the clock-boundary arithmetic, the one path not already covered.
+        await self.leader_poll_feed()
         try:
-            await self.leader_poll_feed()
+            # Clock-driven boundary: once the match clock has advanced its editing window past
+            # the window we are filling, that window's play time is over -> lock + resolve it.
+            if self.clock is None or self._play_screen is None:
+                return
+            match_clock = MatchClock(self.kickoff_epoch, self.clock)
+            if match_clock.editing_window(time.time()) > self.window:
+                self._play_screen.force_resolve()
         except Exception:
             pass
-        # Clock-driven boundary: once the match clock has advanced its editing window past
-        # the window we are filling, that window's play time is over -> lock + resolve it.
-        if self.clock is None or self._play_screen is None:
-            return
-        match_clock = MatchClock(self.kickoff_epoch, self.clock)
-        if match_clock.editing_window(time.time()) > self.window:
-            self._play_screen.force_resolve()
 
     def actuals_for(self, window: int) -> dict:
         start = (self.coord.half() - 1) * _HALF_MIN + (window - 1) * _WINDOW_MIN
