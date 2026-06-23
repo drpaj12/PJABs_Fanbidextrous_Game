@@ -530,14 +530,74 @@ class DungeonPartyFlow:
         self.window = 1
         self._local_shop = None
         self.live = False
+        # LIVE wiring (set by attach_live); None/False in SIM mode.
+        self.feed_client: Optional[FeedClient] = None
+        self.live_feed: Optional[LiveFeed] = None
+        self.fixture_id: int = 0
+        self.clock: Optional[HalfClock] = None
+        self.kickoff_epoch: float = 0.0   # set by start_dungeon_party_live before play
+        self._play_screen: Optional[PartyPlayScreen] = None
+
+    # -- LIVE mode wiring (Task 14) -----------------------------------------
+
+    def attach_live(self, feed_client: FeedClient, live_feed: LiveFeed,
+                    fixture_id: int, clock: HalfClock) -> None:
+        """LIVE mode: the leader fetches the feed and shares match/pool; the match clock
+        drives window boundaries. clock is a HalfClock (half-aware start_minute)."""
+        self.feed_client = feed_client
+        self.live_feed = live_feed
+        self.fixture_id = int(fixture_id)
+        self.clock = clock
+        self.feed = live_feed
+        self.live = True
+
+    async def leader_poll_feed(self) -> None:
+        """Leader only: fetch one relay snapshot, record it, and share the match summary
+        (+ the lineup pool once it arrives) into the blob. Fully guarded -- a network
+        failure here must never crash play; followers render from the blob and never poll
+        the sports API."""
+        if not self.live or not self.coord.is_leader:
+            return
+        try:
+            snap = await self.feed_client.get_feed(self.fixture_id)
+            self.live_feed.record(snap)
+        except Exception:
+            return
+        match = {"home": self.live_feed.home_team(), "away": self.live_feed.away_team(),
+                 "home_goals": self.live_feed.home_goals(),
+                 "away_goals": self.live_feed.away_goals(),
+                 "minute": self.live_feed.current_minute(),
+                 "status": self.live_feed.status_short()}
+        pool_rows = None
+        if not self.coord.party.pool and self.live_feed.has_lineups():
+            pool_rows = self.live_feed.lineups()
+        await self.coord.leader_share_match(match, pool_rows=pool_rows,
+                                            fixture_id=self.fixture_id,
+                                            kickoff_iso=self.live_feed.kickoff_iso() or "")
+
+    def live_actuals_for(self, window: int) -> dict:
+        """Actuals (per-stat deltas) from the live feed for one window. A live Extra-Time
+        window resolves over everything polled so far (its end minute is discovered via
+        last_known_minute, not on the clock) -- mirrors LiveFlow._window_actuals_for."""
+        start = self.clock.window_start(window)
+        if self.clock.is_extra_time(window):
+            end = self.live_feed.last_known_minute()
+        else:
+            end = self.clock.window_end(window)
+        a = self.live_feed.snapshot_at(start)
+        b = self.live_feed.snapshot_at(end)
+        from src.game.normalize_soccer import actuals_from_raw
+        raw = {k: b.delta(a, k) for k in (set(a.stats) | set(b.stats))}
+        return actuals_from_raw(raw, _STATS_MENU)
 
     def start(self) -> None:
         self.app.set_screen(SplashScreen(self.app, self._to_lobby, self.sim))
 
     def _to_lobby(self) -> None:
+        label = "Pick match" if self.live else "Start crawl"
         self.app.set_screen(PartyLobbyScreen(
             self.app, self.coord, on_start=self._leader_start, on_advance=self._to_shop,
-            start_label="Start crawl", sim=self.sim))
+            start_label=label, sim=self.sim))
 
     def _leader_start(self) -> None:
         asyncio.ensure_future(self.coord.leader_start())
@@ -567,8 +627,38 @@ class DungeonPartyFlow:
         return f"{half_label} -- Window {self.window}/{_WINDOWS_PER_HALF}"
 
     def _play_window(self) -> None:
+        if self.live:
+            self._play_window_live()
+            return
         self.app.set_screen(PartyPlayScreen(self.app, self.coord, self.window, self._label(),
                                             self._on_continue, require_all=True, sim=self.sim))
+
+    def _play_window_live(self) -> None:
+        """LIVE window: the leader's poll fetches+shares the feed (on_poll) and the match
+        clock drives the boundary. The player edits one window ahead; when the playing clock
+        crosses into this window (editing_window advances past it), force_resolve auto-submits
+        and the leader resolves with require_all=False. Mirrors LiveFlow's poll-driven,
+        clock-advanced window loop."""
+        screen = PartyPlayScreen(self.app, self.coord, self.window, self._label(),
+                                 self._on_continue, require_all=False,
+                                 on_poll=self._live_poll, sim=self.sim)
+        self._play_screen = screen
+        self.app.set_screen(screen)
+
+    async def _live_poll(self) -> None:
+        """Per-poll LIVE hook (leader fetch+share, then clock-boundary check). Runs inside
+        PartyPlayScreen's poll loop. Guarded so a network/clock failure never crashes play."""
+        try:
+            await self.leader_poll_feed()
+        except Exception:
+            pass
+        # Clock-driven boundary: once the match clock has advanced its editing window past
+        # the window we are filling, that window's play time is over -> lock + resolve it.
+        if self.clock is None or self._play_screen is None:
+            return
+        match_clock = MatchClock(self.kickoff_epoch, self.clock)
+        if match_clock.editing_window(time.time()) > self.window:
+            self._play_screen.force_resolve()
 
     def actuals_for(self, window: int) -> dict:
         start = (self.coord.half() - 1) * _HALF_MIN + (window - 1) * _WINDOW_MIN
@@ -628,6 +718,84 @@ def start_dungeon_party(app: "App", username: str, sim_rel_path: str,
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
     app.set_screen(PartyScreen(app, username, picked, sim))
+
+
+def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
+                             sim_mode: bool = False) -> None:
+    """LIVE cooperative party: the leader fetches the real match feed THROUGH the PHP relay
+    (FeedClient is_lead) and shares the match summary + lineup pool into the party blob; the
+    match clock drives the window boundaries. Followers NEVER call the sports API -- they read
+    the relay cache for the pre-game wait and render the crawl from the leader's shared blob.
+
+    Reuses the full live pre-game stack from start_live: party number (PartyScreen) ->
+    fixture picker (FixtureSelectScreen) -> real-id resolution (LiveResolveScreen) -> lineup
+    wait (LiveWaitScreen). Once lineups arrive the lineup pool is built from the feed, a
+    PartyCoordinator + DungeonPartyFlow are constructed, the live feed/clock are attached, and
+    the flow runs (lobby -> shop -> 3 clock-driven windows per half)."""
+    sim = SimMode(sim_mode)
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+    relay = RelayClient(CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
+    feed_client = FeedClient(CONFIG["relay"]["base_url"],
+                             feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead,
+                             live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
+    sched_cfg = _LIVE["schedule"]
+    try:
+        raw = load_data(f'{CONFIG["assets"]["data_dir"]}/{sched_cfg["file"]}')
+    except (OSError, ValueError):
+        raw = {"games": []}
+    games = load_schedule(raw)
+    # Party windows are the dungeon's 15-minute windows (windows_per_half = 3), NOT the
+    # live half's 5-minute windows: the CrawlSession economy is built around 3 per half.
+    party_clock = HalfClock(_HALF_MIN, _WINDOW_MIN)
+
+    def picker() -> None:
+        app.set_screen(FixtureSelectScreen(app, games, on_resolve, sched_cfg, sim))
+
+    def on_resolve(fixture_id: int) -> None:
+        game = next((g for g in games if g.id == fixture_id), None)
+        feed = LiveFeed()
+        feed.seed_kickoff(game.kickoff_utc if game else "")
+        home = game.home if game else ""
+        away = game.away if game else ""
+
+        def run_with(real_id: int) -> None:
+            def after_lineups() -> None:
+                pool = _pool_from_feed(feed)
+                now_now = time.time()
+                secs = seconds_to_kickoff(feed.kickoff_iso(), now_now)
+                kickoff_epoch = now_now + secs if secs is not None else now_now
+
+                def picked(party_number: int) -> None:
+                    coord = PartyCoordinator(
+                        relay=relay, party_id=party_number, username=username,
+                        pool=pool, actuals_fn=lambda w: flow.live_actuals_for(w))
+                    flow = DungeonPartyFlow(app, feed, pool, coord, sim)
+                    flow.kickoff_epoch = kickoff_epoch
+                    flow.attach_live(feed_client, feed, real_id, party_clock)
+
+                    async def go() -> None:
+                        await coord.join()
+                        flow.start()
+                    asyncio.ensure_future(go())
+
+                app.set_screen(PartyScreen(app, username, picked, sim))
+
+            app.set_screen(LiveWaitScreen(
+                app, feed, feed_client, real_id, target_minute=None,
+                on_ready=after_lineups, poll_seconds=_POLL_SECONDS, sim=sim,
+                wait_for_lineups=True, on_back=picker))
+
+        if home and away:
+            app.set_screen(LiveResolveScreen(
+                app, feed_client, home, away,
+                kickoff_iso=(feed.kickoff_iso() or ""),
+                on_resolved=run_with, poll_seconds=_RESOLVE_POLL_SECONDS,
+                fallback_id=fixture_id, sim=sim, on_back=picker))
+        else:
+            run_with(fixture_id)
+
+    picker()
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
@@ -801,11 +969,15 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     def go_party() -> None:
         start_dungeon_party(app, username, _LAUNCHER["test_sim"], sim_mode=sim_mode)
 
+    def go_party_live() -> None:
+        start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode)
+
     options = [
         (_LAUNCHER["live_label"], go_live),
         (_LAUNCHER["sim_label"], go_sim),
         (_LAUNCHER["dungeon_label"], go_dungeon),
         (_LAUNCHER["party_label"], go_party),
+        (_LAUNCHER["party_live_label"], go_party_live),
     ]
     app.set_screen(LauncherScreen(app, options))
 
