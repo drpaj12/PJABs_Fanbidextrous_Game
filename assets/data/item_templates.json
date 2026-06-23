@@ -3,25 +3,26 @@
   "weapon": {
     "names": ["Sword of {sur}", "Blade of {sur}", "Spear of {sur}", "Axe of {sur}"],
     "two_handed": true,
-    "price":  {"base": 120, "per_star": 40},
+    "price":  {"base": 150, "per_star": 30},
     "effect": {"kind": "dice_bonus", "base": 1, "per_star": 1}
   },
   "armor": {
     "names": ["Aegis of {sur}", "Helm of {sur}", "Bulwark of {sur}", "Mail of {sur}"],
+    "slots": ["head", "body", "shield", "cloak"],
     "two_handed": false,
-    "price":  {"base": 90, "per_star": 30},
+    "price":  {"base": 110, "per_star": 30},
     "effect": {"kind": "soak", "base": 1, "per_star": 1}
   },
   "consumable": {
     "names": ["{sur}'s Potion of Haste", "{sur}'s Draught of Valor", "{sur}'s Elixir of Passage"],
     "two_handed": false,
-    "price":  {"base": 40, "per_star": 15},
+    "price":  {"base": 35, "per_star": 5},
     "effect": {"kind": "auto_pass_or_roll", "base": 2, "per_star": 1}
   },
   "magic": {
     "names": ["{sur}'s Amulet of Fortune", "{sur}'s Charm of Warding", "{sur}'s Sigil of Power"],
     "two_handed": false,
-    "price":  {"base": 150, "per_star": 50},
+    "price":  {"base": 160, "per_star": 50},
     "effect": {"kind": "magic", "options": ["gold", "reroll", "power", "extra_slot"]}
   }
 }

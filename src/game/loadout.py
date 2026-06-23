@@ -26,6 +26,9 @@ class Loadout:
             return False, "already owned"
         if item.category == "weapon" and item.two_handed and self.has_weapon():
             return False, "only one two-handed weapon"
+        if item.category == "armor" and item.armor_slot and any(
+                it.armor_slot == item.armor_slot for it in self.items):
+            return False, "armor slot already filled"
         if len(self.items) >= self.slot_cap():
             return False, "no free slot"
         return True, ""

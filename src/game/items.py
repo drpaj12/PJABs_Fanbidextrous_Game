@@ -40,6 +40,7 @@ class Item:
     effect: dict
     source_pos: str
     stars: int
+    armor_slot: str = ""
 
 
 def _effect(category: str, stars: int, item_id: str) -> dict:
@@ -54,7 +55,11 @@ def build_item(athlete: DraftedAthlete, half: int, price_multiplier: float) -> I
     category = _POS_CATEGORY.get(athlete.broad_position, "consumable")
     tmpl = _TEMPLATES[category]
     names = tmpl["names"]
-    name = names[_stable_index("name:" + athlete.athlete_id, len(names))].format(sur=_surname(athlete.name))
+    # Pair the name and (for armor) the slot off the same stable index so a fighter's
+    # "Helm" always maps to the same slot regardless of process/client.
+    name_index = _stable_index("name:" + athlete.athlete_id, len(names))
+    name = names[name_index].format(sur=_surname(athlete.name))
+    armor_slot = tmpl["slots"][name_index] if category == "armor" else ""
     base_price = tmpl["price"]["base"] + tmpl["price"]["per_star"] * athlete.stars
     return Item(
         item_id=athlete.athlete_id,
@@ -66,6 +71,7 @@ def build_item(athlete: DraftedAthlete, half: int, price_multiplier: float) -> I
         effect=_effect(category, athlete.stars, athlete.athlete_id),
         source_pos=athlete.broad_position,
         stars=athlete.stars,
+        armor_slot=armor_slot,
     )
 
 
