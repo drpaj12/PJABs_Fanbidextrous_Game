@@ -192,11 +192,11 @@ The user approved the plan and added four refinements. Tasks 3/4/5 absorb the fi
 - Modify: `src/ui/flow.py` (route every dungeon mode through a picker before play)
 - Modify: `config/game_config.json` (`launcher.simulations_dir` or reuse `assets.data_dir`)
 
-- [ ] **Step 1:** Build `SimGameSelectScreen(app, games, on_pick)` listing the recorded simulations in `assets/data/simulations/` (currently `wc2018_final_fra_cro`, `wc2018_qf_bra_bel`, `wc2018_sf_fra_bel`). Each row shows a readable label (derive from filename or a `meta` block in the JSON: home v away). `on_pick(path)` starts that game. Reuse the row/scroll pattern; tap a row to select.
-- [ ] **Step 2 (sim modes):** Route the simulated dungeon (`go_dungeon` / `start_dungeon`) and the online/sim party (`go_party`) through `SimGameSelectScreen` first; the picked simulation file feeds the existing flow (replaces the hardcoded `launcher.test_sim` default). If only the dungeon-sim used a fixed file before, it now picks.
-- [ ] **Step 3 (live modes):** Verify the live single-player and live party modes already route through `fixture_select_screen.py`. If any live dungeon path skips it, add it so EVERY mode begins with a game list.
-- [ ] **Step 4:** Headless construct smoke for `SimGameSelectScreen` (3 rows, tap fires `on_pick` with the right path). Re-run `TOOLS/smoke_party.py` + `smoke_party_live.py` (the smokes may need to pass an explicit sim path / pre-pick; keep them green).
-- [ ] **Step 5:** `pytest`; confirm each launcher option lands on a game list. `log.md`; commit.
+- [x] **Step 1:** Build `SimGameSelectScreen(app, games, on_pick)` listing the recorded simulations in `assets/data/simulations/` (currently `wc2018_final_fra_cro`, `wc2018_qf_bra_bel`, `wc2018_sf_fra_bel`). Each row shows a readable label (derive from filename or a `meta` block in the JSON: home v away). `on_pick(path)` starts that game. Reuse the row/scroll pattern; tap a row to select. (Discovery is a pure `src/game/simulations.py::list_simulations(root, dir) -> [SimGame]`; the screen renders title + subtitle.)
+- [x] **Step 2 (sim modes):** Route the simulated dungeon (`go_dungeon` / `start_dungeon`) and the online/sim party (`go_party`) through `SimGameSelectScreen` first; the picked simulation file feeds the existing flow (replaces the hardcoded `launcher.test_sim` default). Done via new `start_sim_select(app, on_pick, sim_mode)`; the simple test game (`go_sim`) routes through it too, and CLI `--dungeon`/`--party` as well, so EVERY offline mode begins with a game list.
+- [x] **Step 3 (live modes):** Verify the live single-player and live party modes already route through `fixture_select_screen.py`. (Confirmed: `start_live_select` and `start_dungeon_party_live` both open `FixtureSelectScreen`; no live path skips the picker.)
+- [x] **Step 4:** Headless construct smoke for `SimGameSelectScreen` (3 rows, tap fires `on_pick` with the right path; SIM auto-picks first; empty state safe). `TOOLS/smoke_party.py` + `smoke_party_live.py` still print OK (drive the coordinator directly, not the launcher, so the picker does not affect them).
+- [x] **Step 5:** `pytest` 311 pass (307 + 4 new); `--dungeon`/`--party`/`--launcher` launch and land on a game list / launcher. `log.md`; commit.
 
 **Two-stage review (crux):** spec then code quality (flow routing touches every entry point).
 
