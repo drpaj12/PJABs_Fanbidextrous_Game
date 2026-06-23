@@ -183,7 +183,14 @@ class PartyPlayScreen(Screen):
             self.action_btn.draw(surface, font(LAYOUT.i("dp_stat_size", 19)))
         elif self.phase == "wait":
             wf = font(LAYOUT.i("pplay_wait_size", 20))
-            msg = "Resolving..." if self.coord.is_leader else "Waiting for the party..."
+            if self.can_resolve is not None and not self.can_resolve(self.window):
+                # LIVE: picks are locked but the match has not yet reached this window's end.
+                # Gated here -- no resolution and no Continue until real data arrives.
+                msg = "Picks in. Waiting for the match..."
+            elif self.coord.is_leader:
+                msg = "Resolving..."
+            else:
+                msg = "Waiting for the party..."
             w = wf.render(msg, True, _C["accent"])
             surface.blit(w, w.get_rect(center=(surface.get_width() // 2,
                                                LAYOUT.i("pplay_wait_y", 420))))

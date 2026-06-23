@@ -174,6 +174,21 @@ class PartyCoordinator:
         await self._push_after_resolve(window)
         return True
 
+    async def leader_catch_up(self, through_window: int) -> int:
+        """Fast-forward the live crawl: resolve every still-unresolved window up to and
+        including `through_window`, forcing defaults for any pick a member never submitted
+        (require_all=False). Used when a client enters a live match that has already played
+        past windows -- those windows auto-resolve so the player lands on the current live
+        window. Leader only; a follower call is a no-op. Returns the new resolved_through."""
+        if not self.is_leader:
+            return self.resolved_through()
+        w = self.resolved_through() + 1
+        while w <= through_window:
+            if not await self.leader_try_resolve(w, require_all=False):
+                break
+            w += 1
+        return self.resolved_through()
+
     async def leader_advance_half(self) -> None:
         """Move from half 1 -> half 2 shop, or close out the match."""
         if not self.is_leader or self.session is None:
@@ -186,6 +201,10 @@ class PartyCoordinator:
             for m in self.party.members:
                 d = m.to_dict()
                 d["ready"] = False
+                # Auto-grant the per-player second-half allowance: top each pot up to
+                # _PER_PLAYER so every player can re-shop in H2 even after auto fast-forward
+                # spent/earned little. Never reduces a pot that carried more gold from H1.
+                d["treasury"] = max(int(m.treasury), _PER_PLAYER)
                 members.append(d)
             await self.relay.party_push(self.party_id, self.username, {
                 "phase": "shop", "half": 2, "resolved_through_window": 0,

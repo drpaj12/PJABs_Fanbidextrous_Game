@@ -136,6 +136,62 @@ def test_leader_resolves_with_force_when_a_follower_did_not_submit():
     assert lead.resolved_through() == 1
 
 
+def test_leader_catch_up_resolves_every_window_through_target_with_defaults():
+    """Live catch-up: the leader fast-forwards past windows the match already played by
+    resolving each with defaults (no member submitted picks for past windows). One call
+    resolves windows 1..target in order and lands resolved_through at the target."""
+    relay, pool = FakeRelay(), _pool()
+    lead, a = _coord(relay, "drpaj", pool), _coord(relay, "alice", pool)
+    _join_all(lead, a)
+    asyncio.run(lead.leader_start())
+    for c in (lead, a):
+        asyncio.run(c.refresh())
+        asyncio.run(c.submit_loadout([], c.shop_budget()))
+    asyncio.run(lead.leader_try_reconcile_shop())
+    asyncio.run(lead.refresh())
+    # No picks submitted for any window -- pure catch-up with defaults.
+    resolved = asyncio.run(lead.leader_catch_up(2))
+    assert resolved == 2 and lead.resolved_through() == 2
+    asyncio.run(a.refresh())
+    assert a.resolved_through() == 2 and a.view()["depth"] > 0
+
+
+def test_leader_catch_up_is_idempotent_and_only_advances_forward():
+    """Calling catch-up to a window already behind resolved_through does nothing; the count
+    never regresses. A second call to the same target is a no-op."""
+    relay, pool = FakeRelay(), _pool()
+    lead, a = _coord(relay, "drpaj", pool), _coord(relay, "alice", pool)
+    _join_all(lead, a)
+    asyncio.run(lead.leader_start())
+    for c in (lead, a):
+        asyncio.run(c.refresh())
+        asyncio.run(c.submit_loadout([], c.shop_budget()))
+    asyncio.run(lead.leader_try_reconcile_shop())
+    asyncio.run(lead.refresh())
+    assert asyncio.run(lead.leader_catch_up(2)) == 2
+    # Target behind the front -- no regression, stays at 2.
+    assert asyncio.run(lead.leader_catch_up(1)) == 2
+    # Same target again -- idempotent no-op.
+    assert asyncio.run(lead.leader_catch_up(2)) == 2
+    assert lead.resolved_through() == 2
+
+
+def test_follower_catch_up_is_a_noop():
+    """Only the leader resolves; a follower's catch-up call returns its current
+    resolved_through without resolving anything."""
+    relay, pool = FakeRelay(), _pool()
+    lead, a = _coord(relay, "drpaj", pool), _coord(relay, "alice", pool)
+    _join_all(lead, a)
+    asyncio.run(lead.leader_start())
+    for c in (lead, a):
+        asyncio.run(c.refresh())
+        asyncio.run(c.submit_loadout([], c.shop_budget()))
+    asyncio.run(lead.leader_try_reconcile_shop())
+    asyncio.run(a.refresh())
+    assert asyncio.run(a.leader_catch_up(3)) == 0
+    assert a.resolved_through() == 0
+
+
 def test_follower_percent_matches_leader_after_h2_window():
     """Drive a 2-member party through all H1 windows, advance to H2, reconcile H2 shop,
     resolve one H2 window, then assert that a follower (no local session) sees the same

@@ -22,6 +22,7 @@ from src.game.session import GameSession
 from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
 from src.game.half_clock import HalfClock, window_data_ready
+from src.game.live_catchup import windows_elapsed
 from src.game.match_clock import MatchClock
 from src.game.half_picker import pick_half
 from src.game.kickoff import seconds_to_kickoff
@@ -727,17 +728,57 @@ class DungeonPartyFlow:
                                             self._on_continue, require_all=True, sim=self.sim))
 
     def _play_window_live(self) -> None:
-        """LIVE window: the leader's poll fetches+shares the feed (on_poll) and the match
-        clock drives the boundary. The player edits one window ahead; when the playing clock
-        crosses into this window (editing_window advances past it), force_resolve auto-submits
-        and the leader resolves with require_all=False. Mirrors LiveFlow's poll-driven,
-        clock-advanced window loop."""
+        """LIVE window entry. Schedules the async catch-up driver: fast-forward past any window
+        the match has already fully played, then gate the player on the current live window."""
+        asyncio.ensure_future(self._enter_live_window())
+
+    async def _enter_live_window(self) -> None:
+        """LIVE catch-up + gating. On entering a window, the leader auto-resolves every window
+        the live feed has already fully covered (applying the bought loadout, with default picks
+        for the past windows the player never saw), so the player lands on the CURRENT live
+        window and is gated there until real data arrives. If catch-up consumes the whole half,
+        advance to the half recap / final instead of gating a window that will never play.
+
+        Re-entered on every Continue, so a window that elapses while the player reads the last
+        result is also skipped. Followers simply skip to the leader's resolved front."""
+        if self.live:
+            if self.coord.is_leader:
+                await self.leader_poll_feed()
+                await self.coord.leader_catch_up(self._windows_elapsed())
+            else:
+                await self.coord.refresh()
+            # Skip past everything already resolved -- land on the first unresolved window.
+            if self.coord.resolved_through() >= self.window:
+                self.window = self.coord.resolved_through() + 1
+        if self.window > _WINDOWS_PER_HALF:
+            # The whole half is already caught up; transition rather than gate a dead window.
+            if self.coord.half() == 1:
+                await self._advance_then_shop()
+            else:
+                await self._advance_then_finish()
+            return
+        self._show_live_window()
+
+    def _show_live_window(self) -> None:
+        """Construct the gated live play screen. The player edits one window ahead; when the
+        match clock crosses this window's boundary (editing_window advances past it),
+        force_resolve auto-submits and the leader resolves with require_all=False once the feed
+        covers the window (can_resolve). Mirrors LiveFlow's poll-driven, clock-advanced loop."""
         screen = PartyPlayScreen(self.app, self.coord, self.window, self._label(),
                                  self._on_continue, require_all=False,
                                  on_poll=self._live_poll,
                                  can_resolve=self._live_data_ready, sim=self.sim)
         self._play_screen = screen
         self.app.set_screen(screen)
+
+    def _windows_elapsed(self) -> int:
+        """How many windows of the CURRENT half the live feed has already fully covered, so
+        catch-up can auto-resolve them. 0 in SIM or before the feed is attached."""
+        if not self.live or self.clock is None or self.live_feed is None:
+            return 0
+        match_over = self.live_feed.match_status() in (_HALFTIME_STATUS, _FINISHED_STATUS)
+        return windows_elapsed(self.live_feed.last_known_minute(), self.clock,
+                               _WINDOWS_PER_HALF, match_over)
 
     def _live_data_ready(self, window: int) -> bool:
         """LIVE resolution gate: True once the live feed actually covers this window's data,
