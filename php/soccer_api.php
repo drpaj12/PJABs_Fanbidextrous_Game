@@ -113,6 +113,163 @@ function get_revealed_windows(array $room, int $my_player): array {
     return $revealed;
 }
 
+// -------------------------------------------------------------------------
+// Party helpers (per-player economy blob; mirrors Python Party.to_dict())
+// -------------------------------------------------------------------------
+define('MAX_PARTIES', 4);
+define('PARTY_MAX_SIZE', 3);
+
+function get_party_path(int $party): string { return ROOMS_DIR . "party_$party.json"; }
+
+function read_party(int $party): ?array {
+    $path = get_party_path($party);
+    if (!file_exists($path)) { return null; }
+    $c = file_get_contents($path);
+    return $c === false ? null : json_decode($c, true);
+}
+
+function write_party(int $party, array $data): bool {
+    $data['updated_at'] = time();
+    // Keep window_picks as a JSON object ({}) even when empty.
+    if (isset($data['window_picks']) && is_array($data['window_picks'])
+            && count($data['window_picks']) === 0) {
+        $data['window_picks'] = new stdClass();
+    }
+    return file_put_contents(get_party_path($party),
+        json_encode($data, JSON_PRETTY_PRINT), LOCK_EX) !== false;
+}
+
+function norm_user(string $u): string { return strtolower(trim($u)); }
+
+function create_empty_party(int $party, string $leader): array {
+    return [
+        'party_id'   => $party,
+        'leader'     => $leader,
+        'phase'      => 'lobby',
+        'half'       => 1,
+        'fixture_id' => 0,
+        'kickoff_iso' => '',
+        'match' => [
+            'home' => '', 'away' => '',
+            'home_goals' => 0, 'away_goals' => 0,
+            'minute' => 0, 'status' => 'NS',
+        ],
+        'pool'    => [],
+        'members' => [[
+            'username' => $leader, 'slot' => 0, 'items' => [],
+            'treasury' => 0, 'ready' => false, 'alive' => true, 'wounds' => 0,
+        ]],
+        'dungeon'                   => null,
+        'log'                       => [],
+        'window_colors'             => [],
+        'resolved_through_window'   => 0,
+        'window_picks'              => new stdClass(),
+    ];
+}
+
+function party_member_index(array $p, string $user): int {
+    foreach ($p['members'] as $i => $m) {
+        if (norm_user($m['username']) === $user) { return $i; }
+    }
+    return -1;
+}
+
+// -------------------------------------------------------------------------
+// Party action handlers
+// -------------------------------------------------------------------------
+
+function action_party_join(int $party): void {
+    if ($party < 0 || $party >= MAX_PARTIES) { fail('Invalid party number'); }
+    $input = json_decode(file_get_contents('php://input'), true);
+    $user  = norm_user($input['username'] ?? '');
+    if ($user === '') { fail('Missing username'); }
+
+    $p = read_party($party);
+    if (!$p) {
+        $p = create_empty_party($party, $user);
+        write_party($party, $p);
+        respond(['success' => true, 'slot' => 0, 'is_leader' => true]);
+    }
+
+    $idx = party_member_index($p, $user);
+    if ($idx >= 0) {
+        respond([
+            'success'   => true,
+            'slot'      => (int)$p['members'][$idx]['slot'],
+            'is_leader' => (norm_user($p['leader']) === $user),
+        ]);
+    }
+
+    if (count($p['members']) >= PARTY_MAX_SIZE) { fail('Party is full', 409); }
+    $slot = count($p['members']);
+    $p['members'][] = [
+        'username' => $user, 'slot' => $slot, 'items' => [],
+        'treasury' => 0, 'ready' => false, 'alive' => true, 'wounds' => 0,
+    ];
+    write_party($party, $p);
+    respond(['success' => true, 'slot' => $slot, 'is_leader' => false]);
+}
+
+function action_party_state(int $party): void {
+    $p = read_party($party);
+    if (!$p) { fail('Party not found', 404); }
+    respond(['success' => true, 'party' => $p]);
+}
+
+function action_party_pick(int $party): void {
+    $p = read_party($party);
+    if (!$p) { fail('Party not found', 404); }
+    $input = json_decode(file_get_contents('php://input'), true);
+    $idx   = party_member_index($p, norm_user($input['username'] ?? ''));
+    if ($idx < 0) { fail('Not a member', 403); }
+
+    $slot  = (string)$p['members'][$idx]['slot'];
+    $picks = (array)($p['window_picks'] ?? []);
+    $picks[$slot] = [
+        'w'     => (int)($input['window'] ?? 0),
+        'preds' => array_values((array)($input['preds'] ?? [])),
+    ];
+    $p['window_picks'] = $picks;
+    write_party($party, $p);
+    respond(['success' => true]);
+}
+
+function action_party_loadout(int $party): void {
+    $p = read_party($party);
+    if (!$p) { fail('Party not found', 404); }
+    $input = json_decode(file_get_contents('php://input'), true);
+    $idx   = party_member_index($p, norm_user($input['username'] ?? ''));
+    if ($idx < 0) { fail('Not a member', 403); }
+
+    $p['members'][$idx]['items']    = array_values((array)($input['item_ids'] ?? []));
+    $p['members'][$idx]['treasury'] = (int)($input['treasury'] ?? 0);
+    $p['members'][$idx]['ready']    = true;
+    write_party($party, $p);
+    respond(['success' => true]);
+}
+
+function action_party_push(int $party): void {
+    $p = read_party($party);
+    if (!$p) { fail('Party not found', 404); }
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (norm_user($input['username'] ?? '') !== norm_user($p['leader'])) {
+        fail('Only the leader may push state', 403);
+    }
+
+    foreach (['phase', 'half', 'fixture_id', 'kickoff_iso', 'match', 'pool', 'members',
+              'dungeon', 'log', 'window_colors', 'resolved_through_window'] as $key) {
+        if (array_key_exists($key, $input)) { $p[$key] = $input[$key]; }
+    }
+    if (!empty($input['clear_picks'])) { $p['window_picks'] = new stdClass(); }
+    write_party($party, $p);
+    respond(['success' => true]);
+}
+
+// -------------------------------------------------------------------------
+// Room action handlers
+// -------------------------------------------------------------------------
+
 function action_list(): void {
     cleanup_old_rooms();
     $rooms = [];
@@ -301,16 +458,17 @@ function action_leave(int $room, string $token): void {
 }
 
 $action = $_GET['action'] ?? '';
-$room = isset($_GET['room']) ? intval($_GET['room']) : -1;
-$token = $_GET['token'] ?? '';
+$room   = isset($_GET['room'])  ? intval($_GET['room'])  : -1;
+$party  = isset($_GET['party']) ? intval($_GET['party']) : -1;
+$token  = $_GET['token'] ?? '';
 
 switch ($action) {
-    case 'list': action_list(); break;
-    case 'join': action_join($room); break;
-    case 'state': action_state($room, $token); break;
-    case 'update': action_update($room, $token); break;
+    case 'list':      action_list(); break;
+    case 'join':      action_join($room); break;
+    case 'state':     action_state($room, $token); break;
+    case 'update':    action_update($room, $token); break;
     case 'heartbeat': action_heartbeat($room, $token); break;
-    case 'leave': action_leave($room, $token); break;
+    case 'leave':     action_leave($room, $token); break;
     case 'reset':
         if ($room >= 0 && $room < MAX_ROOMS) {
             delete_room($room);
@@ -318,9 +476,18 @@ switch ($action) {
         }
         fail('Invalid room number');
         break;
+    // --- Party actions (per-player economy; co-op multiplayer) ---
+    case 'party_join':     action_party_join($party); break;
+    case 'party_state':    action_party_state($party); break;
+    case 'party_pick':     action_party_pick($party); break;
+    case 'party_loadout':  action_party_loadout($party); break;
+    case 'party_push':     action_party_push($party); break;
     case '':
-        respond(['name' => 'PJAB Coop Soccer Relay', 'version' => '1.0.0',
-                 'endpoints' => ['list', 'join', 'state', 'update', 'heartbeat', 'leave']]);
+        respond(['name' => 'PJAB Coop Soccer Relay', 'version' => '1.1.0',
+                 'endpoints' => [
+                     'list', 'join', 'state', 'update', 'heartbeat', 'leave',
+                     'party_join', 'party_state', 'party_pick', 'party_loadout', 'party_push',
+                 ]]);
         break;
     default: fail("Unknown action: $action");
 }
