@@ -37,3 +37,26 @@ def test_member_lookup_is_case_insensitive():
     p = Party.create(party_id=0, leader="drpaj")
     assert p.member("DRPAJ") is p.members[0]
     assert p.member("nobody") is None
+
+
+def test_new_member_takes_next_free_slot():
+    p = Party.create(party_id=0, leader="drpaj")
+    assert p.join_or_restore("alice", max_size=3) == (1, True)
+    assert p.member("alice").slot == 1
+    assert p.join_or_restore("bob", max_size=3) == (2, True)
+
+
+def test_rejoin_by_username_restores_seat():
+    p = Party.create(party_id=0, leader="drpaj")
+    p.join_or_restore("alice", max_size=3)            # slot 1
+    assert p.join_or_restore("Alice", max_size=3) == (1, False)   # case-insensitive
+    assert len(p.members) == 2
+
+
+def test_full_party_rejects_new_member_but_admits_existing():
+    p = Party.create(party_id=0, leader="drpaj")
+    p.join_or_restore("a", max_size=3)
+    p.join_or_restore("b", max_size=3)
+    assert p.join_or_restore("c", max_size=3) == (None, False)
+    assert len(p.members) == 3
+    assert p.join_or_restore("drpaj", max_size=3) == (0, False)

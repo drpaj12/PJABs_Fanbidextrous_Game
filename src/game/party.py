@@ -75,6 +75,18 @@ class Party:
     def is_leader(self, username: str) -> bool:
         return _norm(username) == self.leader
 
+    def join_or_restore(self, username: str, max_size: int) -> tuple[Optional[int], bool]:
+        """Rejoin-by-username: an existing member keeps their seat; a new member takes the
+        next free slot up to max_size. Returns (slot, is_new); (None, False) when full."""
+        existing = self.member(username)
+        if existing is not None:
+            return existing.slot, False
+        if len(self.members) >= int(max_size):
+            return None, False
+        slot = len(self.members)
+        self.members.append(Member(username=_norm(username), slot=slot))
+        return slot, True
+
     def to_dict(self) -> dict:
         return {
             "party_id": self.party_id, "leader": self.leader, "phase": self.phase,
