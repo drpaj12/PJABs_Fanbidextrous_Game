@@ -77,10 +77,11 @@ class PartyCoordinator:
         p = self.party
         d = (p.dungeon if p and p.dungeon else {})
         size = len(p.members) if p else 1
-        # cleared_prev_halves is known only on the leader's session; for followers it is
-        # not stored in the relay blob, so we fall back to 0 (acceptable for H1 display
-        # and for the percent estimate that followers see).
-        cleared_prev = self.session.cleared_prev_halves if self.session else 0
+        # cleared_prev is written into the dungeon blob by the leader at every
+        # _push_after_resolve so followers have the correct H1 depth when computing
+        # H2 percent. Fall back to the local session (leader path) or 0 (pre-resolve).
+        cleared_prev = int(d.get("cleared_prev",
+                                 self.session.cleared_prev_halves if self.session else 0))
         depth = int(d.get("depth", 0))
         return {
             "depth": depth,
@@ -114,6 +115,12 @@ class PartyCoordinator:
         await self.refresh()
         if self.party is None:
             return
+        # INVARIANT: members[] is a whole-array replace on the relay (the PHP party_push
+        # overwrites the entire members key, not individual slots). The leader must only
+        # push members at a phase boundary where followers are idle on member fields.
+        # Here that is safe: this push also flips phase from lobby -> shop, so followers
+        # have not yet started writing their loadout/treasury/ready fields. Pushing members
+        # mid-shop would clobber a follower's in-flight loadout submission.
         members = []
         for m in self.party.members:
             d = m.to_dict()
@@ -168,6 +175,8 @@ class PartyCoordinator:
             return
         if self.session.half == 1:
             self.session.begin_second_half()
+            # Safe to push members here (see INVARIANT note in leader_start): the phase
+            # flips to shop simultaneously, so followers are not writing member fields.
             members = []
             for m in self.party.members:
                 d = m.to_dict()
@@ -209,6 +218,8 @@ class PartyCoordinator:
         member's updated treasury share, and a flag to clear the now-stale window_picks."""
         s = self.session
         shares = split_gold(self.last_gold, len(self.party.members))
+        # Safe to push members here (see INVARIANT note in leader_start): resolve runs
+        # during play phase when followers write only window_picks, not member fields.
         members = []
         for m in sorted(self.party.members, key=lambda x: x.slot):
             d = m.to_dict()
@@ -216,8 +227,11 @@ class PartyCoordinator:
             d["wounds"] = s.state.wounds
             d["alive"] = s.state.wounds < _MAX_WOUNDS
             members.append(d)
+        # cleared_prev is included so followers can compute the correct H2 percent.
+        # DungeonState.from_dict ignores unknown keys, so the extra field is safe.
+        dungeon_payload = {**s.state.to_dict(), "cleared_prev": s.cleared_prev_halves}
         await self.relay.party_push(self.party_id, self.username, {
-            "dungeon": s.state.to_dict(), "log": list(s.log),
+            "dungeon": dungeon_payload, "log": list(s.log),
             "window_colors": list(s.window_colors), "members": members,
             "resolved_through_window": window, "clear_picks": True})
         await self.refresh()

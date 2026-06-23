@@ -134,3 +134,74 @@ def test_leader_resolves_with_force_when_a_follower_did_not_submit():
     assert asyncio.run(lead.leader_try_resolve(1, require_all=True)) is False   # blocked
     assert asyncio.run(lead.leader_try_resolve(1, require_all=False)) is True   # forced
     assert lead.resolved_through() == 1
+
+
+def test_follower_percent_matches_leader_after_h2_window():
+    """Drive a 2-member party through all H1 windows, advance to H2, reconcile H2 shop,
+    resolve one H2 window, then assert that a follower (no local session) sees the same
+    view()["percent"] as the leader.  Before the cleared_prev fix this would be wrong
+    because followers had cleared_prev=0 and so under-reported progress by a full half."""
+    # windows_per_half = 3 (game.windows_per_half in game_config.json)
+    WINDOWS_PER_HALF = 3
+    PICKS = {"goal": 1, "shot": 3, "corner": 3, "card": 1, "foul": 4}
+
+    relay, pool = FakeRelay(), _pool()
+    lead = _coord(relay, "drpaj", pool)
+    follower = _coord(relay, "alice", pool)
+    _join_all(lead, follower)
+
+    # --- H1 shop ---
+    asyncio.run(lead.leader_start())
+    for c in (lead, follower):
+        asyncio.run(c.refresh())
+        asyncio.run(c.submit_loadout([], c.shop_budget()))
+    asyncio.run(lead.leader_try_reconcile_shop())
+    for c in (lead, follower):
+        asyncio.run(c.refresh())
+    assert lead.phase() == "play"
+
+    # --- H1 play: resolve all windows ---
+    for w in range(1, WINDOWS_PER_HALF + 1):
+        for c in (lead, follower):
+            asyncio.run(c.submit_pick(w, PICKS))
+        asyncio.run(lead.refresh())
+        ok = asyncio.run(lead.leader_try_resolve(w))
+        assert ok, f"H1 window {w} should resolve"
+    asyncio.run(follower.refresh())
+    assert lead.resolved_through() == WINDOWS_PER_HALF
+
+    # --- advance to H2 ---
+    asyncio.run(lead.leader_advance_half())
+    for c in (lead, follower):
+        asyncio.run(c.refresh())
+    assert lead.phase() == "shop" and lead.half() == 2
+
+    # --- H2 shop ---
+    for c in (lead, follower):
+        asyncio.run(c.submit_loadout([], c.shop_budget()))
+    asyncio.run(lead.leader_try_reconcile_shop())
+    for c in (lead, follower):
+        asyncio.run(c.refresh())
+    assert lead.phase() == "play"
+
+    # --- resolve one H2 window ---
+    for c in (lead, follower):
+        asyncio.run(c.submit_pick(1, PICKS))
+    asyncio.run(lead.refresh())
+    ok = asyncio.run(lead.leader_try_resolve(1))
+    assert ok, "H2 window 1 should resolve"
+
+    # --- build a fresh follower coord (no local session) and refresh from relay ---
+    fresh_follower = _coord(relay, "alice", pool)
+    asyncio.run(fresh_follower.join())   # restores slot via join_or_restore
+
+    # Both the leader and the fresh follower must report identical percent.
+    # The leader uses self.session.cleared_prev_halves; the follower reads it from
+    # the dungeon blob (cleared_prev key written by _push_after_resolve).
+    leader_pct = lead.view()["percent"]
+    follower_pct = fresh_follower.view()["percent"]
+    assert leader_pct > 0, "leader percent should be non-zero after H1 + 1 H2 window"
+    assert follower_pct == leader_pct, (
+        f"follower percent {follower_pct} != leader percent {leader_pct}; "
+        "cleared_prev is not propagating through the blob"
+    )
