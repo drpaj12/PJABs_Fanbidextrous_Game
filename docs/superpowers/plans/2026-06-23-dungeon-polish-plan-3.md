@@ -41,15 +41,15 @@
 **Files:**
 - Modify: `src/ui/flow.py` (the `options = [...]` list in `start_launcher`, ~line 1096)
 
-- [ ] **Step 1:** Reorder the `options` list so live modes lead and simulated modes trail. Keep all existing labels and callbacks. Target order:
+- [x] **Step 1:** Reorder the `options` list so live modes lead and simulated modes trail. Keep all existing labels and callbacks. Target order:
   1. `(_LAUNCHER["party_live_label"], go_party_live)`  — Dungeon party (live match)
   2. `(_LAUNCHER["live_label"], go_live)`              — Live match
   3. `(_LAUNCHER["party_label"], go_party)`            — Dungeon party (online, sim feed)
   4. `(_LAUNCHER["dungeon_label"], go_dungeon)`        — Dungeon crawl (simulated)
   5. `(_LAUNCHER["sim_label"], go_sim)`                — Test game (simulated)
-- [ ] **Step 2:** Verify headless: construct `LauncherScreen(App(), options)` under `SDL_VIDEODRIVER=dummy` and assert the first button label == `_LAUNCHER["party_live_label"]`.
-- [ ] **Step 3:** `.venv/Scripts/python -m pytest tests/ -q` (no regressions), confirm `.venv/Scripts/python src/main.py --party` still launches.
-- [ ] **Step 4:** Append to `log.md`; commit.
+- [x] **Step 2:** Verify headless: construct `LauncherScreen(App(), options)` under `SDL_VIDEODRIVER=dummy` and assert the first button label == `_LAUNCHER["party_live_label"]`.
+- [x] **Step 3:** `.venv/Scripts/python -m pytest tests/ -q` (no regressions), confirm `.venv/Scripts/python src/main.py --party` still launches.
+- [x] **Step 4:** Append to `log.md`; commit.
 
 ---
 
@@ -61,18 +61,18 @@
 - Modify: `src/game/loadout.py` (`can_add`: forbid duplicate armor slot)
 - Test: `tests/test_loadout.py`, `tests/test_items.py` (create if missing)
 
-- [ ] **Step 1 (prices):** In `item_templates.json` set premium gear + cheap consumables:
-  - weapon: `{"base": 150, "per_star": 45}`
+- [x] **Step 1 (prices):** In `item_templates.json` set premium gear + cheap consumables:
+  - weapon: `{"base": 150, "per_star": 30}`  (TUNED from 45 -> 30 during impl so the top 5-star weapon caps at 300, keeping one weapon affordable in a single fighter's pot; otherwise a 4-5 star weapon exceeded 300 and `test_buy_deducts_gold_and_adds_to_loadout` failed)
   - armor: `{"base": 110, "per_star": 30}`
   - consumable: `{"base": 35, "per_star": 5}`  (1-star=40 ... 5-star=55; six 1-stars = 240, comfortably under 300)
   - magic: `{"base": 160, "per_star": 50}`
   Add an armor `"slots": ["head", "body", "shield", "cloak"]` list aligned 1:1 with the four armor `names` entries.
-- [ ] **Step 2 (item field):** In `src/game/items.py` add `armor_slot: str = ""` to the `Item` dataclass. In `build_item`, when `category == "armor"`, set `armor_slot` to the slot whose index matches the chosen name index (reuse the existing `_stable_index("name:"+id, len(names))` so name and slot stay paired). Non-armor items keep `armor_slot=""`.
-- [ ] **Step 3 (failing test):** In `tests/test_loadout.py` add a test: build two armor `Item`s with the same `armor_slot` (different `item_id`); `can_add` the second returns `(False, "armor slot already filled")`. Also assert two armor of *different* slots both add, and that 6 cheap consumables all add (slot cap respected). Run it, expect FAIL.
-- [ ] **Step 4 (rule):** In `loadout.py` `can_add`, after the two-handed weapon check, add: if `item.category == "armor"` and any existing item has the same non-empty `armor_slot`, return `(False, "armor slot already filled")`.
-- [ ] **Step 5:** Run the new tests + full suite; expect PASS. Confirm the 1.5x second-half multiplier still applies on top of the new bases (existing test or add one: a half-2 catalog item price == round(base*1.5)).
-- [ ] **Step 6:** Headless: build a `CrawlSession(party_size=1)` with a synthetic 6-athlete pool, buy six consumables within the 300 pot, assert all six placed and treasury >= 0.
-- [ ] **Step 7:** `log.md`; commit.
+- [x] **Step 2 (item field):** In `src/game/items.py` add `armor_slot: str = ""` to the `Item` dataclass. In `build_item`, when `category == "armor"`, set `armor_slot` to the slot whose index matches the chosen name index (reuse the existing `_stable_index("name:"+id, len(names))` so name and slot stay paired). Non-armor items keep `armor_slot=""`.
+- [x] **Step 3 (failing test):** In `tests/test_loadout.py` add a test: build two armor `Item`s with the same `armor_slot` (different `item_id`); `can_add` the second returns `(False, "armor slot already filled")`. Also assert two armor of *different* slots both add, and that 6 cheap consumables all add (slot cap respected). Run it, expect FAIL.
+- [x] **Step 4 (rule):** In `loadout.py` `can_add`, after the two-handed weapon check, add: if `item.category == "armor"` and any existing item has the same non-empty `armor_slot`, return `(False, "armor slot already filled")`.
+- [x] **Step 5:** Run the new tests + full suite; expect PASS. Confirm the 1.5x second-half multiplier still applies on top of the new bases (existing test or add one: a half-2 catalog item price == round(base*1.5)).
+- [x] **Step 6:** Headless: build a `CrawlSession(party_size=1)` with a synthetic 6-athlete pool, buy six consumables within the 300 pot, assert all six placed and treasury >= 0.
+- [x] **Step 7:** `log.md`; commit.
 
 **Two-stage review (crux):** spec compliance, then code quality.
 
