@@ -81,3 +81,34 @@ class RelayClient:
 
     async def submit_score_event(self, room: int, token: str, code: str) -> dict[str, Any]:
         return await self._update(room, token, {"type": "score_event", "code": code})
+
+    # ------------------------------------------------------------------
+    # Party methods (multi-player lobby; party identified by integer id)
+    # ------------------------------------------------------------------
+
+    def _party_url(self, action: str, party: int) -> str:
+        return f"{self._base}{self._path}?action={action}&party={party}"
+
+    async def party_join(self, party: int, username: str) -> dict[str, Any]:
+        body = json.dumps({"type": "party_join", "username": username})
+        return json.loads(await self._t.post(self._party_url("party_join", party), body))
+
+    async def party_state(self, party: int) -> dict[str, Any]:
+        return json.loads(await self._t.get(self._party_url("party_state", party)))
+
+    async def party_pick(self, party: int, username: str, window: int,
+                         preds: list[str]) -> dict[str, Any]:
+        body = json.dumps({"type": "party_pick", "username": username,
+                           "window": window, "preds": preds})
+        return json.loads(await self._t.post(self._party_url("party_pick", party), body))
+
+    async def party_loadout(self, party: int, username: str, item_ids: list[str],
+                            treasury: int) -> dict[str, Any]:
+        body = json.dumps({"type": "party_loadout", "username": username,
+                           "item_ids": item_ids, "treasury": treasury})
+        return json.loads(await self._t.post(self._party_url("party_loadout", party), body))
+
+    async def party_push(self, party: int, username: str,
+                         state: dict[str, Any]) -> dict[str, Any]:
+        body = json.dumps({"type": "party_push", "username": username, **state})
+        return json.loads(await self._t.post(self._party_url("party_push", party), body))
