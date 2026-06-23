@@ -41,3 +41,11 @@ def test_reroll_takes_second_die_on_fail():
     out = resolve_gate(rng, weapon_bonus=0, armor_soak=0, power=0, half=1,
                        party_size=1, threat=0, reroll=True)   # diff 6; reroll 6 >= 6
     assert out.passed is True and out.roll == 6
+
+
+def test_dungeon_state_round_trips_through_dict():
+    st = DungeonState(half=2, party_size=3, depth=11, power=4, wounds=1,
+                      threat=2, gates_passed=2, finished=False)
+    again = DungeonState.from_dict(st.to_dict())
+    assert again.to_dict() == st.to_dict()
+    assert again.total_tiles == st.total_tiles

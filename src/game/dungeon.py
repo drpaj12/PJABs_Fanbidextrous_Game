@@ -26,6 +26,31 @@ class DungeonState:
     def total_tiles(self) -> int:
         return total_tiles_half(self.half, self.party_size)
 
+    def to_dict(self) -> dict:
+        return {
+            "half": self.half,
+            "party_size": self.party_size,
+            "depth": self.depth,
+            "power": self.power,
+            "wounds": self.wounds,
+            "threat": self.threat,
+            "gates_passed": self.gates_passed,
+            "finished": self.finished,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DungeonState":
+        return cls(
+            half=int(d["half"]),
+            party_size=int(d["party_size"]),
+            depth=int(d.get("depth", 0)),
+            power=int(d.get("power", 0)),
+            wounds=int(d.get("wounds", 0)),
+            threat=int(d.get("threat", 0)),
+            gates_passed=int(d.get("gates_passed", 0)),
+            finished=bool(d.get("finished", False)),
+        )
+
 
 def gate_step(half: int) -> int:
     return int(_D["gate_every_tiles_half1"] if half == 1 else _D["gate_every_tiles_half2"])
