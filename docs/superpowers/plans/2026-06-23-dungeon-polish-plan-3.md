@@ -120,12 +120,14 @@
 - Modify: `src/ui/screens/party_play_screen.py`
 - Verify: headless construct smoke
 
-- [ ] **Step 1 (log colors):** In `LogList.draw`, color lines by prefix: `PRED ... GREEN`-> green text, `PRED ... RED`/`BIG MISS` -> red, `GATE ... FAIL` -> red, `POWER`/`GATE ... PASS` -> accent, else default. Keep the existing "GOAL" accent rule. (Simple `startswith`/`in` checks; no parsing of numbers.)
-- [ ] **Step 2 (dungeon underline/colors):** In `dungeon_play_screen.py` resolved phase, draw each of the 5 stat rows again as a compact results strip: `f"{label}: you {predicted} / was {actual}"` colored green/red/orange from `self.result.stat_results`, with an UNDERLINE (a `pygame.draw.line` under the text in the same color) for correct (green) predictions — mirroring the simple game's per-prediction feedback. Keep the depth meter + window-color cells below.
-- [ ] **Step 3 (party underline/colors):** Do the same in `party_play_screen.py` using `self.result`/the resolved data the screen already holds (the LOCAL player's lines vs `result.actuals`). Followers without a `result` fall back to the existing view-only rendering (no crash).
-- [ ] **Step 4:** Headless smoke for both screens: resolve a window, switch to resolved phase, assert the strip draws colored lines + an underline rect for a green stat, no traceback.
-- [ ] **Step 5:** `.venv/Scripts/python -m pytest tests/ -q`; confirm `--dungeon` and `--party` launch.
-- [ ] **Step 6:** `log.md`; commit.
+- [x] **Step 1 (log colors):** In `LogList.draw`, color lines by prefix: `PRED ... GREEN`-> green text, `PRED ... RED`/`BIG MISS` -> red, `GATE ... FAIL` -> red, `POWER`/`GATE ... PASS` -> accent, else default. Keep the existing "GOAL" accent rule. (Simple `startswith`/`in` checks; no parsing of numbers.)
+- [x] **Step 2 (dungeon underline/colors):** In `dungeon_play_screen.py` resolved phase, draw each of the 5 stat rows again as a compact results strip: `f"{label}: you {predicted} / was {actual}"` colored green/red/orange from `self.result.stat_results`, with an UNDERLINE (a `pygame.draw.line` under the text in the same color) for correct (green) predictions — mirroring the simple game's per-prediction feedback. Keep the depth meter + window-color cells below.
+- [x] **Step 3 (party underline/colors):** Do the same in `party_play_screen.py` using `self.result`/the resolved data the screen already holds (the LOCAL player's lines vs `result.actuals`). Followers without a `result` fall back to the existing view-only rendering (no crash). DEVIATION: the party screen never holds a `WindowResult` (the leader resolves; followers read `view()`). Implemented by having the leader push per-window `actuals` into the canonical blob and grading the LOCAL player's `self.lines` against `view()["actuals"]` via the shared pure `window_resolver.build_stat_results`; clients without pushed actuals fall back to the depth/colors view.
+- [x] **Step 4:** Headless smoke for both screens: resolve a window, switch to resolved phase, assert the strip draws colored lines + an underline rect for a green stat, no traceback.
+- [x] **Step 5:** `.venv/Scripts/python -m pytest tests/ -q`; confirm `--dungeon` and `--party` launch.
+- [x] **Step 6:** `log.md`; commit.
+
+Also added the predict-phase `monster_flavor()` text render here (deferred from Task 4 / plan Task 7 logic step).
 
 ---
 

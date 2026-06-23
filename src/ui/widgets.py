@@ -1,6 +1,8 @@
 # src/ui/widgets.py
 """Mobile-friendly pygame widgets: large touch targets. All pygame lives in src/ui/."""
 import math
+import time
+
 import pygame
 from src.game import ability_text
 from src.utils.asset_loader import load_icon
@@ -119,6 +121,25 @@ class MeterBar:
                 dy = int(math.sin(ang) * 30 * explode)
                 pygame.draw.line(surface, _C["white"], (cx, cy),
                                  (cx + dx, cy + dy), 2)
+
+
+def wall_clock_str() -> str:
+    """Local time of day as HH:MM. pygbag-safe -- uses strftime, never JS Date.now()."""
+    return time.strftime("%H:%M")
+
+
+def draw_match_banner(surface: pygame.Surface, scoreline: str, y: int,
+                      clock: str = "") -> None:
+    """Top banner: the actual match scoreline (+minute/status) left-aligned, and the real
+    wall-clock time of day right-aligned, on the same row. `scoreline` is built by the screen
+    from its feed (single-device) or `coord.view()['match']` (party)."""
+    m = LAYOUT.i("screen_margin", 20)
+    sf = font(LAYOUT.i("banner_score_size", 15))
+    surface.blit(sf.render(scoreline, True, _C["text_dim"]), (m, y))
+    if clock:
+        cf = font(LAYOUT.i("banner_clock_size", 16))
+        img = cf.render(clock, True, _C["accent"])
+        surface.blit(img, (surface.get_width() - m - img.get_width(), y))
 
 
 def wrap_text(text: str, f: pygame.font.Font, max_width: int) -> list[str]:

@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, LogList, draw_depth_meter, font, wrap_text
+from src.ui.widgets import (Button, LogList, draw_depth_meter, draw_match_banner,
+                            font, wall_clock_str, wrap_text)
 from src.ui.sim import SimMode
 from src.game.crawl import CrawlSession
 from src.game.dungeon import gate_step, monster_flavor
@@ -115,9 +116,8 @@ class DungeonPlayScreen(Screen):
         m = LAYOUT.i("screen_margin", 20)
         hf = font(LAYOUT.i("dp_header_size", 18))
         surface.blit(hf.render(self.label, True, _C["accent"]), (m, LAYOUT.i("dp_header_y", 14)))
-        sf = font(LAYOUT.i("dp_score_size", 15))
-        surface.blit(sf.render(self._match_line(), True, _C["text_dim"]),
-                     (m, LAYOUT.i("dp_score_y", 38)))
+        draw_match_banner(surface, self._match_line(), LAYOUT.i("dp_score_y", 38),
+                          wall_clock_str())
         stf = font(LAYOUT.i("dp_status_size", 16))
         surface.blit(stf.render(self._status_line(), True, _C["white"]),
                      (m, LAYOUT.i("dp_status_y", 60)))

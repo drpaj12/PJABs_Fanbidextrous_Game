@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, LogList, draw_depth_meter, font, wrap_text
+from src.ui.widgets import (Button, LogList, draw_depth_meter, draw_match_banner,
+                            font, wall_clock_str, wrap_text)
 from src.ui.sim import SimMode
 from src.sync.party_coordinator import PartyCoordinator
 from src.game.dungeon import gate_step, monster_flavor
@@ -136,11 +137,14 @@ class PartyPlayScreen(Screen):
         v = self.coord.view()
         hf = font(LAYOUT.i("dp_header_size", 18))
         surface.blit(hf.render(self.label, True, _C["accent"]), (m, LAYOUT.i("dp_header_y", 14)))
-        scf = font(LAYOUT.i("pplay_score_size", 16))
         mt = v.get("match", {})
-        score = (f"{mt.get('home','')} {mt.get('home_goals',0)}-{mt.get('away_goals',0)} "
-                 f"{mt.get('away','')}  ({mt.get('minute',0)}')") if mt.get("home") else ""
-        surface.blit(scf.render(score, True, _C["text_dim"]), (m, LAYOUT.i("pplay_score_y", 38)))
+        if mt.get("home"):
+            status = f" {mt['status']}" if mt.get("status") else ""
+            score = (f"{mt.get('home','')} {mt.get('home_goals',0)}-{mt.get('away_goals',0)} "
+                     f"{mt.get('away','')}  ({mt.get('minute',0)}'{status})")
+        else:
+            score = "Waiting for match data..."
+        draw_match_banner(surface, score, LAYOUT.i("pplay_score_y", 38), wall_clock_str())
         stf = font(LAYOUT.i("dp_status_size", 16))
         status = f"Power {v['power']}   Wounds {v['wounds']}   My gold {self.coord.my_treasury()}"
         surface.blit(stf.render(status, True, _C["white"]), (m, LAYOUT.i("dp_status_y", 60)))
