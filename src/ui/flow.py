@@ -1093,12 +1093,13 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     def go_party_live() -> None:
         start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode)
 
+    # Live modes float to the top; simulated modes sink to the bottom.
     options = [
-        (_LAUNCHER["live_label"], go_live),
-        (_LAUNCHER["sim_label"], go_sim),
-        (_LAUNCHER["dungeon_label"], go_dungeon),
-        (_LAUNCHER["party_label"], go_party),
         (_LAUNCHER["party_live_label"], go_party_live),
+        (_LAUNCHER["live_label"], go_live),
+        (_LAUNCHER["party_label"], go_party),
+        (_LAUNCHER["dungeon_label"], go_dungeon),
+        (_LAUNCHER["sim_label"], go_sim),
     ]
     app.set_screen(LauncherScreen(app, options))
 
