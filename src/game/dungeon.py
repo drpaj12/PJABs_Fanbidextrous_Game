@@ -63,6 +63,16 @@ def monster_difficulty(half: int, party_size: int, threat: int) -> int:
                + _D["monster_difficulty_per_threat"] * threat)
 
 
+def monster_flavor(half: int, party_size: int, threat: int) -> dict:
+    """Per-window predict-phase flavor: how many monsters the party faces and how many fall
+    to this fighter. `total` is the gate difficulty; `yours` is the party-split share."""
+    total = monster_difficulty(half, party_size, threat)
+    name = _D["monsters"]["half1_name"] if half == 1 else _D["monsters"]["half2_name"]
+    yours = max(1, round(total / max(1, party_size)))
+    text = f"Your party is engaging {total} {name}, you will fight {yours} of them."
+    return {"total": total, "yours": yours, "name": name, "text": text}
+
+
 @dataclass(frozen=True)
 class GateOutcome:
     passed: bool
