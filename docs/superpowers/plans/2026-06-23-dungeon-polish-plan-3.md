@@ -102,11 +102,11 @@
 - Modify: `src/game/window_resolver.py` (`WindowResult` + `resolve_window`)
 - Test: `tests/test_window_resolver.py`
 
-- [ ] **Step 1 (failing test):** Add a test asserting `WindowResult` now carries `stat_results: list` where each entry is a small immutable record `(code, label, predicted, actual, band_label, color_key)` for the FIRST fighter's lines, and `actuals: dict` (the per-stat actual values used). Assert an exact prediction yields `color_key == "green"`, a big miss `"red"`, in-between `"orange"`. Run, expect FAIL.
-- [ ] **Step 2 (implement):** In `resolve_window`, while grading the first fighter's lines with `grade_progress(line, actual)`, build `stat_results` using the band: `green` if `band.key in ("exact","close")`, `red` if `band.is_big_miss`, else `orange`. Add `stat_results` and `actuals` fields to the `WindowResult` dataclass (defaults `field(default_factory=...)`). Keep tiles/color/gold math unchanged.
-- [ ] **Step 3 (mixed log):** After the existing `"... party advance +N (COLOR)"` line, append one per-stat line per stat, prefixed so the UI can color it, e.g. `f"PRED   {label} {predicted} vs {actual}  {band.label}"`. Keep these grouped under the window so the bottom log reads as: advance, per-prediction outcomes, POWER/GATE/DEPTH progression.
-- [ ] **Step 4:** Run tests + full suite; expect PASS. Confirm `stat_results` length == number of stats and order matches `STAT_CODES`.
-- [ ] **Step 5:** `log.md`; commit.
+- [x] **Step 1 (failing test):** Add a test asserting `WindowResult` now carries `stat_results: list` where each entry is a small immutable record `(code, label, predicted, actual, band_label, color_key)` for the FIRST fighter's lines, and `actuals: dict` (the per-stat actual values used). Assert an exact prediction yields `color_key == "green"`, a big miss `"red"`, in-between `"orange"`. Run, expect FAIL.
+- [x] **Step 2 (implement):** In `resolve_window`, while grading the first fighter's lines with `grade_progress(line, actual)`, build `stat_results` using the band: `green` if `band.key in ("exact","close")`, `red` if `band.is_big_miss`, else `orange`. Add `stat_results` and `actuals` fields to the `WindowResult` dataclass (defaults `field(default_factory=...)`). Keep tiles/color/gold math unchanged.
+- [x] **Step 3 (mixed log):** After the existing `"... party advance +N (COLOR)"` line, append one per-stat line per stat, prefixed so the UI can color it, e.g. `f"PRED   {label} {predicted} vs {actual}  {band.label}"`. Keep these grouped under the window so the bottom log reads as: advance, per-prediction outcomes, POWER/GATE/DEPTH progression.
+- [x] **Step 4:** Run tests + full suite; expect PASS. Confirm `stat_results` length == number of stats and order matches `STAT_CODES`.
+- [x] **Step 5:** `log.md`; commit.
 
 **Two-stage review (crux):** spec compliance, then code quality.
 
@@ -155,9 +155,9 @@
 - Modify: `src/ui/screens/dungeon_play_screen.py` and `src/ui/screens/party_play_screen.py` (show it in predict phase)
 - Test: `tests/test_dungeon.py`
 
-- [ ] **Step 1 (config):** Add `"monsters": {"half1_name": "goblins", "half2_name": "ogres"}` under `dungeon`.
-- [ ] **Step 2 (failing test):** In `tests/test_dungeon.py` test `monster_flavor(half=1, party_size=3, threat=0)` returns a dict `{"total": T, "yours": Y, "name": "goblins", "text": "..."}` where `total == monster_difficulty(1, 3, 0)` and `yours == max(1, round(total / party_size))`, and `text` reads like `"Your party is engaging {total} {name}, you will fight {yours} of them."` Run, expect FAIL.
-- [ ] **Step 3 (helper):** Implement pure `monster_flavor(half, party_size, threat)` in `dungeon.py` using `monster_difficulty` for `total`, `name` from config by half, `yours = max(1, round(total / party_size))`, and the ASCII `text` string.
+- [x] **Step 1 (config):** Add `"monsters": {"half1_name": "goblins", "half2_name": "ogres"}` under `dungeon`.
+- [x] **Step 2 (failing test):** In `tests/test_dungeon.py` test `monster_flavor(half=1, party_size=3, threat=0)` returns a dict `{"total": T, "yours": Y, "name": "goblins", "text": "..."}` where `total == monster_difficulty(1, 3, 0)` and `yours == max(1, round(total / party_size))`, and `text` reads like `"Your party is engaging {total} {name}, you will fight {yours} of them."` Run, expect FAIL.
+- [x] **Step 3 (helper):** Implement pure `monster_flavor(half, party_size, threat)` in `dungeon.py` using `monster_difficulty` for `total`, `name` from config by half, `yours = max(1, round(total / party_size))`, and the ASCII `text` string.
 - [ ] **Step 4 (UI):** In both play screens' predict phase, render `monster_flavor(...).text` (party uses `coord.half()`/party size; single-device uses the session). Wrap with `wrap_text` so it fits 414px.
 - [ ] **Step 5:** Run tests + full suite; confirm `--dungeon`/`--party` show the flavor line in the predict phase.
 - [ ] **Step 6:** `log.md`; commit.

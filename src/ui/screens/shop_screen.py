@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, ScrollButtons, font
+from src.ui.widgets import Button, ItemDetail, ScrollButtons, font
 from src.ui.sim import SimMode
 from src.game.crawl import CrawlSession
 from src.utils.asset_loader import load_icon
@@ -38,12 +38,14 @@ class ShopScreen(Screen):
         self.catalog = session.catalog()
         self.feedback = ""
         self.scroll = 0
+        self.zoom_idx: Optional[int] = None
         sw, sh = app.screen.get_size()
         m = LAYOUT.i("screen_margin", 20)
         self.done_btn = Button(
             pygame.Rect(m, sh - LAYOUT.i("shop_done_btn_h", 56) - 12,
                         sw - 2 * m, LAYOUT.i("shop_done_btn_h", 56)),
             "Descend into the dungeon")
+        self.detail = ItemDetail(pygame.Rect(m, 116, sw - 2 * m, sh - 116 - 84))
         self.scroll_btns = ScrollButtons(self._viewport())
 
     # -- geometry --
@@ -80,6 +82,12 @@ class ShopScreen(Screen):
             return
         if event.type != pygame.MOUSEBUTTONDOWN:
             return
+        # While a detail panel is open, a tap on Buy/Sell acts; any other tap closes it.
+        if self.zoom_idx is not None:
+            if self.detail.action_btn.hit(event.pos):
+                self._tap_item(self.catalog[self.zoom_idx])
+            self.zoom_idx = None
+            return
         if self.scroll_btns.contains(event.pos):
             self.scroll = self.scroll_btns.handle(event, self.scroll, self._max_scroll())
             return
@@ -90,7 +98,7 @@ class ShopScreen(Screen):
             return
         for i, item in enumerate(self.catalog):
             if self._row_rect(i).collidepoint(event.pos):
-                self._tap_item(item)
+                self.zoom_idx = i
                 return
 
     def _tap_item(self, item) -> None:
@@ -138,9 +146,14 @@ class ShopScreen(Screen):
             self._draw_row(surface, r, item, nf, sf)
         surface.set_clip(prev)
 
-        if self._max_scroll() > 0:
+        if self.zoom_idx is None and self._max_scroll() > 0:
             self.scroll_btns.draw(surface, self.scroll, self._max_scroll())
         self.done_btn.draw(surface, nf)
+
+        if self.zoom_idx is not None:
+            item = self.catalog[self.zoom_idx]
+            self.detail.action_btn.label = "Sell" if self._owned(item) else "Buy"
+            self.detail.draw(surface, item, self.session.treasury)
 
     def _draw_row(self, surface: pygame.Surface, r: pygame.Rect, item,
                   nf: pygame.font.Font, sf: pygame.font.Font) -> None:
@@ -155,10 +168,12 @@ class ShopScreen(Screen):
             surface.blit(pygame.transform.smoothscale(icon, (size, size)), icon_box)
         else:
             pygame.draw.rect(surface, _C["border"], icon_box, border_radius=6)
+        # Card body only: icon + name + category/stars/price. No right-gutter tag text
+        # (the old "tap to buy"/"OWNED" tag overlapped long names) -- tap the row to
+        # open the zoom/buy detail panel instead.
         tx = icon_box.right + 10
-        surface.blit(nf.render(item.name[:18], True, _C["white"]), (tx, r.y + 8))
+        name_col = _C["background"] if owned else _C["white"]
+        surface.blit(nf.render(item.name[:22], True, name_col), (tx, r.y + 8))
         sub = f"{item.category}  {'*' * item.stars}  {item.price}g"
-        surface.blit(sf.render(sub, True, _C["text_dim"]), (tx, r.y + 36))
-        tag = "OWNED -- tap to sell" if owned else "tap to buy"
-        ts = sf.render(tag, True, _C["background"] if owned else _C["accent"])
-        surface.blit(ts, (r.right - ts.get_width() - 10, r.y + 8))
+        sub_col = _C["background"] if owned else _C["text_dim"]
+        surface.blit(sf.render(sub, True, sub_col), (tx, r.y + 36))

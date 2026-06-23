@@ -3,6 +3,7 @@
 import math
 import pygame
 from src.game import ability_text
+from src.utils.asset_loader import load_icon
 from src.utils.constants import CONFIG, LAYOUT
 
 _C = CONFIG["colors"]
@@ -259,6 +260,69 @@ class PlayerDetail:
             y += gap
 
         self.select_btn.draw(surface, bf)
+
+
+def item_effect_summary(item) -> str:
+    """One-line human read of a shop item's effect (ASCII, for the detail panel)."""
+    eff = item.effect
+    value = int(eff.get("value", 0))
+    if item.category == "weapon":
+        return f"Weapon: +{value} to your party's gate rolls."
+    if item.category == "armor":
+        return f"Armor ({item.armor_slot}): soaks up to {value} damage on a failed gate."
+    if item.category == "consumable":
+        return f"Consumable: +{value} to one gate roll this window, then it is spent."
+    if item.category == "magic":
+        return f"Magic: {eff.get('option', 'boon')} -- a one-off party boon."
+    return "A curious trinket."
+
+
+class ItemDetail:
+    """Zoomed detail panel for one shop item, with a Buy/Sell button (label set by caller)."""
+
+    def __init__(self, rect: pygame.Rect) -> None:
+        self.rect = rect
+        self.action_btn = Button(
+            pygame.Rect(rect.x + 16, rect.bottom - LAYOUT.i("draft_select_btn_h", 56) - 12,
+                        rect.width - 32, LAYOUT.i("draft_select_btn_h", 56)),
+            "Buy")
+
+    def draw(self, surface: pygame.Surface, item, treasury: int) -> None:
+        pygame.draw.rect(surface, _C["surface"], self.rect, border_radius=12)
+        pygame.draw.rect(surface, _C["accent"], self.rect, width=2, border_radius=12)
+        nf = font(LAYOUT.i("draft_detail_size", 22) + 4)
+        bf = font(LAYOUT.i("draft_detail_size", 22))
+        rf = font(LAYOUT.i("draft_detail_role_size", 18))
+        gap = LAYOUT.i("draft_detail_line_gap", 32)
+        x = self.rect.x + 16
+        max_w = self.rect.width - 32
+        y = self.rect.y + 16
+
+        size = LAYOUT.i("shop_detail_icon", 56)
+        icon = load_icon(item.category)
+        icon_box = pygame.Rect(x, y, size, size)
+        if icon is not None:
+            surface.blit(pygame.transform.smoothscale(icon, (size, size)), icon_box)
+        else:
+            pygame.draw.rect(surface, _C["border"], icon_box, border_radius=8)
+        for line in wrap_text(item.name, nf, max_w - size - 12)[:2]:
+            surface.blit(nf.render(line, True, _C["white"]), (icon_box.right + 12, y))
+            y += LAYOUT.i("draft_detail_role_gap", 26)
+        y = max(y, icon_box.bottom) + 10
+
+        surface.blit(bf.render(f"{item.category}  {'*' * item.stars}  {item.price}g",
+                               True, _C["gold"]), (x, y))
+        y += gap
+        if item.armor_slot:
+            surface.blit(bf.render(f"Slot: {item.armor_slot}", True, _C["text"]), (x, y))
+            y += gap
+        for line in wrap_text(item_effect_summary(item), rf, max_w):
+            surface.blit(rf.render(line, True, _C["accent"]), (x, y))
+            y += LAYOUT.i("draft_detail_role_gap", 26)
+        y += 8
+        surface.blit(bf.render(f"Your gold: {treasury}", True, _C["gold"]), (x, y))
+
+        self.action_btn.draw(surface, bf)
 
 
 def draw_depth_meter(surface: pygame.Surface, rect: pygame.Rect, depth: int,
