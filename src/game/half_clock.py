@@ -45,3 +45,22 @@ class HalfClock:
     @staticmethod
     def is_half_over(status: str, halftime_status: str) -> bool:
         return status == halftime_status
+
+
+def window_data_ready(last_known_minute: int, window: int, clock: HalfClock,
+                      match_over: bool) -> bool:
+    """Whether a live crawl window may resolve yet -- i.e. the feed actually holds the data
+    for that window. A window must NOT resolve at the bare clock boundary: the live feed
+    minute lags real time, so resolving early grades the picks against stale cumulative
+    totals (every stat reads delta ~0 -> every prediction looks like a big miss). Gating on
+    data availability makes the actuals query happen WITHIN the window, like the offline
+    crawl. Mirrors live_play_screen.windows_ready() for the single-player live path.
+
+    Ready when the match has ended/halftime (no further data will arrive), else when the feed
+    covers the window's end minute. The Extra-Time window has no computable end minute, so it
+    resolves only once the match is over."""
+    if match_over:
+        return True
+    if clock.is_extra_time(window):
+        return False
+    return last_known_minute >= clock.window_end(window)

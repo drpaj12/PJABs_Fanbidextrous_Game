@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import (Button, LogList, draw_depth_meter, draw_match_banner,
-                            font, wall_clock_str, wrap_text)
+from src.ui.widgets import (Button, LogList, ScrollButtons, draw_depth_meter,
+                            draw_match_banner, font, wall_clock_str, wrap_text)
 from src.ui.sim import SimMode
 from src.sync.party_coordinator import PartyCoordinator
 from src.game.dungeon import gate_step, monster_flavor
@@ -31,6 +31,7 @@ class PartyPlayScreen(Screen):
     def __init__(self, app: "App", coord: PartyCoordinator, window: int, label: str,
                  on_continue: Callable[[], None], require_all: bool = True,
                  on_poll: Optional[Callable[[], Awaitable[None]]] = None,
+                 can_resolve: Optional[Callable[[int], bool]] = None,
                  sim: Optional[SimMode] = None) -> None:
         super().__init__(app)
         self.coord = coord
@@ -39,6 +40,11 @@ class PartyPlayScreen(Screen):
         self.on_continue = on_continue
         self.require_all = require_all
         self.on_poll = on_poll
+        # LIVE data gate: the leader resolves this window only when can_resolve(window) is True
+        # (the live feed actually covers the window's end minute), so the actuals query reads
+        # real per-window deltas instead of stale zeros. None in SIM -> resolve as soon as the
+        # require_all picks gate allows (the recorded feed always holds the data).
+        self.can_resolve = can_resolve
         self.sim = sim
         self.phase = "edit"
         self.lines = {s["code"]: s["default_line"] for s in _STATS}
@@ -47,11 +53,18 @@ class PartyPlayScreen(Screen):
         self._logged = 0
         sw, sh = app.screen.get_size()
         m = LAYOUT.i("screen_margin", 20)
-        self.log = LogList(pygame.Rect(m, LAYOUT.i("dp_content_top", 92),
-                                       sw - 2 * m, LAYOUT.i("dp_log_h", 150)))
         self.action_btn = Button(
             pygame.Rect(m, sh - LAYOUT.i("dp_btn_h", 56) - 12, sw - 2 * m,
                         LAYOUT.i("dp_btn_h", 56)), "Submit picks")
+        # Crawl log UNDERNEATH the resolution summary, scrollable via the ScrollButtons gutter
+        # (mirrors DungeonPlayScreen -- no mouse wheel on a phone).
+        log_top = LAYOUT.i("dp_log_top", 372)
+        log_full = pygame.Rect(m, log_top, sw - 2 * m,
+                               self.action_btn.rect.top - 12 - log_top)
+        self.log = LogList(pygame.Rect(log_full.x, log_full.y,
+                                       log_full.width - ScrollButtons.gutter(),
+                                       log_full.height))
+        self.log_scroll = ScrollButtons(log_full)
 
     def _stat_step(self) -> int:
         return LAYOUT.i("dp_stat_row_h", 48) + LAYOUT.i("dp_stat_gap", 6)
@@ -79,6 +92,10 @@ class PartyPlayScreen(Screen):
                     return
         elif self.phase == "resolved":
             self.log.handle(event)
+            if event.type == pygame.MOUSEBUTTONDOWN and self.log_scroll.contains(event.pos):
+                self.log.scroll_to(self.log_scroll.handle(
+                    event, self.log.scroll, self.log.max_scroll()))
+                return
             if event.type == pygame.MOUSEBUTTONDOWN and self.action_btn.hit(event.pos):
                 self.on_continue()
             elif self.sim and self.sim.is_key(event, pygame.K_s):
@@ -119,7 +136,10 @@ class PartyPlayScreen(Screen):
                 await self.coord.refresh()
                 if self.on_poll is not None:
                     await self.on_poll()
-                if self.coord.is_leader:
+                # on_poll may have just recorded a fresh snapshot; gate resolution on the feed
+                # covering this window before the leader scores it (LIVE only -- see can_resolve).
+                if (self.coord.is_leader
+                        and (self.can_resolve is None or self.can_resolve(self.window))):
                     await self.coord.leader_try_resolve(self.window, self.require_all)
             finally:
                 self._polling = False
@@ -127,6 +147,15 @@ class PartyPlayScreen(Screen):
 
     def _enter_resolved(self) -> None:
         self.phase = "resolved"
+        # Encounter flavor first (display-only, wrapped to the log width), then the
+        # leader-pushed resolution log -- so the scrollable log reads as encounter + outcome.
+        if self._logged == 0:
+            v = self.coord.view()
+            size = max(1, len(v.get("members", [])))
+            flavor = monster_flavor(self.coord.half(), size, int(v.get("threat", 0)))["text"]
+            ff = font(LAYOUT.i("play_log_line_size", 16))
+            for wline in wrap_text(flavor, ff, self.log.rect.width - 8):
+                self.log.add(wline)
         for line in self.coord.view()["log"][self._logged:]:
             self.log.add(line)
         self._logged = len(self.coord.view()["log"])
@@ -186,9 +215,10 @@ class PartyPlayScreen(Screen):
             y += LAYOUT.i("dp_flavor_line_gap", 24)
 
     def _draw_resolved(self, surface: pygame.Surface, v: dict) -> None:
-        self.log.draw(surface)
+        # Resolution summary first (cells -> depth meter -> per-prediction strip), top-down,
+        # with the scrollable crawl log UNDERNEATH it.
         m = LAYOUT.i("screen_margin", 20)
-        cells_y = self.log.rect.bottom + LAYOUT.i("dp_section_gap", 24)
+        cells_y = LAYOUT.i("dp_content_top", 92)
         h, gap = LAYOUT.i("dp_cells_h", 28), LAYOUT.i("dp_cell_gap", 6)
         for i, key in enumerate(v["window_colors"]):
             cell = pygame.Rect(m + i * (h + gap), cells_y, h, h)
@@ -200,6 +230,9 @@ class PartyPlayScreen(Screen):
         meter_h = LAYOUT.i("depth_label_size", 14) + 4 + LAYOUT.i("depth_meter_h", 26)
         self._draw_results_strip(surface, v, m, meter_y + meter_h
                                  + LAYOUT.i("dp_section_gap", 24))
+        self.log.draw(surface)
+        if self.log.max_scroll() > 0:
+            self.log_scroll.draw(surface, self.log.scroll, self.log.max_scroll())
 
     def _draw_results_strip(self, surface: pygame.Surface, v: dict, x: int, y: int) -> None:
         """Per-prediction feedback for THIS player's own picks vs the leader-pushed actuals:

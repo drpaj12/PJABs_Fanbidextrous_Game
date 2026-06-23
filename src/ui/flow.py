@@ -21,7 +21,7 @@ from src.game.roster import Roster
 from src.game.session import GameSession
 from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
-from src.game.half_clock import HalfClock
+from src.game.half_clock import HalfClock, window_data_ready
 from src.game.match_clock import MatchClock
 from src.game.half_picker import pick_half
 from src.game.kickoff import seconds_to_kickoff
@@ -76,6 +76,7 @@ _HALFTIME_LABEL = CONFIG["game"]["halftime_label"]
 _FULLTIME_LABEL = CONFIG["game"]["fulltime_label"]
 _ET_LABEL = CONFIG["game"]["extra_time_label"]
 _HALFTIME_STATUS = CONFIG["feed"]["halftime_status"]
+_FINISHED_STATUS = "finished"
 _POLL_SECONDS = CONFIG["feed"]["poll_seconds"]
 _RESOLVE_POLL_SECONDS = CONFIG["feed"]["live_resolve_poll_seconds"]
 _RNG_SEED = CONFIG["game"]["rng_seed"]
@@ -733,9 +734,22 @@ class DungeonPartyFlow:
         clock-advanced window loop."""
         screen = PartyPlayScreen(self.app, self.coord, self.window, self._label(),
                                  self._on_continue, require_all=False,
-                                 on_poll=self._live_poll, sim=self.sim)
+                                 on_poll=self._live_poll,
+                                 can_resolve=self._live_data_ready, sim=self.sim)
         self._play_screen = screen
         self.app.set_screen(screen)
+
+    def _live_data_ready(self, window: int) -> bool:
+        """LIVE resolution gate: True once the live feed actually covers this window's data,
+        so leader_try_resolve grades against real per-window deltas (not stale zeros). The
+        clock boundary locks the picks (force_resolve); THIS defers the scoring until the
+        query has the data -- the 'queries happen in the window' behaviour. Mirrors the
+        single-player live path's windows_ready() gate."""
+        if self.clock is None or self.live_feed is None:
+            return True
+        match_over = self.live_feed.match_status() in (_HALFTIME_STATUS, _FINISHED_STATUS)
+        return window_data_ready(self.live_feed.last_known_minute(), window,
+                                 self.clock, match_over)
 
     async def _live_poll(self) -> None:
         """Per-poll LIVE hook (leader fetch+share, then clock-boundary check). Runs inside
@@ -1102,20 +1116,9 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
                    username: str = "") -> None:
     """Web entry: choose 'Live match' (real fixtures + relay) or 'Test game' (an offline
     recorded match, no API/no waiting) so the full flow can be tried without a live game."""
-    def go_live() -> None:
-        start_live_select(app, sim_mode=sim_mode, is_lead=is_lead, username=username)
-
-    # The "(simulated)" modes always play their recorded match deterministically
-    # (downstream sim_mode=True), but the PICKER inherits the launcher's sim_mode so a real
-    # web user (sim_mode=False) taps a game rather than having the first one auto-picked.
-    def go_sim() -> None:
-        start_sim_select(app, lambda path: start_simulation(app, path, sim_mode=True),
-                         sim_mode=sim_mode)
-
-    def go_dungeon() -> None:
-        start_sim_select(app, lambda path: start_dungeon_sim(app, path, sim_mode=True),
-                         sim_mode=sim_mode)
-
+    # The simulated party crawl plays its recorded match deterministically (downstream
+    # sim_mode=True), but the PICKER inherits the launcher's sim_mode so a real web user
+    # (sim_mode=False) taps a game rather than having the first one auto-picked.
     def go_party() -> None:
         start_sim_select(app, lambda path: start_dungeon_party(app, username, path,
                                                                sim_mode=sim_mode),
@@ -1124,13 +1127,10 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     def go_party_live() -> None:
         start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode)
 
-    # Live modes float to the top; simulated modes sink to the bottom.
+    # Two modes only: the live dungeon crawl and its simulated (recorded-match) twin.
     options = [
         (_LAUNCHER["party_live_label"], go_party_live),
-        (_LAUNCHER["live_label"], go_live),
         (_LAUNCHER["party_label"], go_party),
-        (_LAUNCHER["dungeon_label"], go_dungeon),
-        (_LAUNCHER["sim_label"], go_sim),
     ]
     app.set_screen(LauncherScreen(app, options))
 

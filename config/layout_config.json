@@ -184,6 +184,7 @@
   "dp_section_size": 16,
   "dp_section_gap": 24,
   "dp_log_h": 150,
+  "dp_log_top": 372,
   "dp_log_label_size": 15,
   "dp_cells_h": 28,
   "dp_cell_gap": 6,

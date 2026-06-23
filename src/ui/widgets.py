@@ -207,19 +207,41 @@ class Popup:
 
 
 class LogList:
-    """Scrollable list of short result lines inside a clip rect (newest at bottom)."""
+    """Scrollable list of short result lines inside a clip rect.
+
+    Top-down model (oldest line at the top, newest at the bottom): `scroll` is a pixel offset
+    in [0, max_scroll], 0 = top/oldest, max = bottom/newest. By default it sticks to the
+    newest line, so the latest narrative is visible without scrolling; once the user scrolls
+    up to read history the stick releases, and re-engages when they scroll back to the bottom.
+    Pairs with a ScrollButtons in the owning screen (up = older, down = newer) for touch.
+    """
 
     def __init__(self, rect: pygame.Rect) -> None:
         self.rect = rect
         self.entries: list[str] = []
         self.scroll = 0
+        self._stick = True   # pin to the newest line until the user scrolls up
 
     def add(self, line: str) -> None:
         self.entries.append(line)
 
+    def _line_h(self) -> int:
+        return LAYOUT.i("play_log_line_size", 16) + 6
+
+    def content_h(self) -> int:
+        return len(self.entries) * self._line_h()
+
+    def max_scroll(self) -> int:
+        return max(0, self.content_h() - self.rect.height)
+
+    def scroll_to(self, value: int) -> None:
+        """Set the scroll offset (clamped); used by the ScrollButtons in the owning screen."""
+        self.scroll = max(0, min(self.max_scroll(), value))
+        self._stick = self.scroll >= self.max_scroll()
+
     def handle(self, event: pygame.event.Event) -> None:
         if event.type == pygame.MOUSEWHEEL and self.rect.collidepoint(pygame.mouse.get_pos()):
-            self.scroll = max(0, self.scroll - event.y * 30)
+            self.scroll_to(self.scroll - event.y * 30)
 
     @staticmethod
     def _line_color(line: str) -> list[int]:
@@ -240,16 +262,20 @@ class LogList:
         return _C["text"]
 
     def draw(self, surface: pygame.Surface) -> None:
-        line_h = LAYOUT.i("play_log_line_size", 16) + 6
+        line_h = self._line_h()
         f = font(LAYOUT.i("play_log_line_size", 16))
+        if self._stick:                       # keep the newest line pinned to the bottom
+            self.scroll = self.max_scroll()
         prev = surface.get_clip()
         surface.set_clip(self.rect)
-        y = self.rect.bottom - line_h + self.scroll
-        for line in reversed(self.entries):
-            if y < self.rect.top - line_h:
+        y = self.rect.top - self.scroll       # oldest first, top-down
+        for line in self.entries:
+            if y > self.rect.bottom:
                 break
-            surface.blit(f.render(line, True, self._line_color(line)), (self.rect.x + 4, y))
-            y -= line_h
+            if y > self.rect.top - line_h:
+                surface.blit(f.render(line, True, self._line_color(line)),
+                             (self.rect.x + 4, y))
+            y += line_h
         surface.set_clip(prev)
 
 

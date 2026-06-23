@@ -150,11 +150,8 @@
     }
   },
   "launcher": {
-    "_comment": "Web entry menu: Live match (real fixtures + relay) vs an offline simulated test game. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
-    "live_label": "Live match",
-    "sim_label": "Test game (simulated)",
-    "dungeon_label": "Dungeon crawl (simulated)",
-    "party_label": "Dungeon party (online)",
+    "_comment": "Web entry menu: only the live dungeon crawl and its simulated (recorded-match) twin. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
+    "party_label": "Dungeon party (online party simulated)",
     "party_live_label": "Dungeon party (live match)",
     "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json",
     "simulations_dir": "assets/data/simulations"

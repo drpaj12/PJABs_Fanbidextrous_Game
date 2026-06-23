@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import (Button, LogList, draw_depth_meter, draw_match_banner,
-                            font, wall_clock_str, wrap_text)
+from src.ui.widgets import (Button, LogList, ScrollButtons, draw_depth_meter,
+                            draw_match_banner, font, wall_clock_str, wrap_text)
 from src.ui.sim import SimMode
 from src.game.crawl import CrawlSession
 from src.game.dungeon import gate_step, monster_flavor
@@ -49,14 +49,22 @@ class DungeonPlayScreen(Screen):
         self.lines = {s["code"]: s["default_line"] for s in _STATS}
         sw, sh = app.screen.get_size()
         m = LAYOUT.i("screen_margin", 20)
-        self.log = LogList(pygame.Rect(m, LAYOUT.i("dp_content_top", 92),
-                                       sw - 2 * m, LAYOUT.i("dp_log_h", 150)))
-        for line in session.log:
-            self.log.add(line)
         self.action_btn = Button(
             pygame.Rect(m, sh - LAYOUT.i("dp_btn_h", 56) - 12,
                         sw - 2 * m, LAYOUT.i("dp_btn_h", 56)),
             "Descend")
+        # Crawl log sits UNDERNEATH the resolution summary, filling the band between dp_log_top
+        # and the action button, scrollable via the ScrollButtons gutter (no mouse wheel on a
+        # phone). The list content is narrowed by the gutter so lines never sit under the arrows.
+        log_top = LAYOUT.i("dp_log_top", 372)
+        log_full = pygame.Rect(m, log_top, sw - 2 * m,
+                               self.action_btn.rect.top - 12 - log_top)
+        self.log = LogList(pygame.Rect(log_full.x, log_full.y,
+                                       log_full.width - ScrollButtons.gutter(),
+                                       log_full.height))
+        self.log_scroll = ScrollButtons(log_full)
+        for line in session.log:
+            self.log.add(line)
 
     # -- geometry for the predict-phase stat rows --
     def _stat_step(self) -> int:
@@ -88,6 +96,10 @@ class DungeonPlayScreen(Screen):
                     return
         else:  # resolved
             self.log.handle(event)
+            if event.type == pygame.MOUSEBUTTONDOWN and self.log_scroll.contains(event.pos):
+                self.log.scroll_to(self.log_scroll.handle(
+                    event, self.log.scroll, self.log.max_scroll()))
+                return
             if self.sim and self.sim.is_key(event, pygame.K_s):
                 self.on_continue()
                 return
@@ -101,6 +113,14 @@ class DungeonPlayScreen(Screen):
             self.lines[code] = max(0, self.lines[code] - 1)
 
     def _descend(self) -> None:
+        # Capture the encounter flavor BEFORE resolving (resolve mutates threat), and fold it
+        # into the log so the player can scroll the resolved view to re-read it next to the
+        # outcome lines. Wrapped to the log width since LogList renders one line per entry.
+        st = self.session.state
+        flavor = monster_flavor(st.half, st.party_size, st.threat)["text"]
+        ff = font(LAYOUT.i("play_log_line_size", 16))
+        for wline in wrap_text(flavor, ff, self.log.rect.width - 8):
+            self.log.add(wline)
         self.result = self.on_descend(dict(self.lines))
         for line in self.result.log:
             self.log.add(line)
@@ -165,9 +185,10 @@ class DungeonPlayScreen(Screen):
             y += LAYOUT.i("dp_flavor_line_gap", 24)
 
     def _draw_resolved(self, surface: pygame.Surface) -> None:
-        self.log.draw(surface)
+        # Resolution summary first (cells -> depth meter -> per-prediction strip), top-down,
+        # with the scrollable crawl log UNDERNEATH it.
         m = LAYOUT.i("screen_margin", 20)
-        cells_y = self.log.rect.bottom + LAYOUT.i("dp_section_gap", 24)
+        cells_y = LAYOUT.i("dp_content_top", 92)
         self._draw_window_cells(surface, m, cells_y)
         meter_y = cells_y + LAYOUT.i("dp_cells_h", 28) + LAYOUT.i("dp_section_gap", 24)
         draw_depth_meter(
@@ -178,6 +199,9 @@ class DungeonPlayScreen(Screen):
         meter_h = LAYOUT.i("depth_label_size", 14) + 4 + LAYOUT.i("depth_meter_h", 26)
         self._draw_results_strip(surface, m, meter_y + meter_h
                                  + LAYOUT.i("dp_section_gap", 24))
+        self.log.draw(surface)
+        if self.log.max_scroll() > 0:
+            self.log_scroll.draw(surface, self.log.scroll, self.log.max_scroll())
 
     def _draw_results_strip(self, surface: pygame.Surface, x: int, y: int) -> None:
         """Per-prediction feedback: 'label: you P / was A' tinted green/orange/red, with an
