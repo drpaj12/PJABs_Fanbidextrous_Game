@@ -117,3 +117,30 @@ def test_match_over_only_after_second_half_windows():
     s.begin_second_half()
     s.window_index = 3
     assert s.match_over()
+
+
+def test_set_loadout_rebuilds_from_item_ids_without_charging_gold():
+    import random
+    from src.game.crawl import CrawlSession
+    pool = _pool()
+    session = CrawlSession(party_size=2, pool=pool, rng=random.Random(99))
+    treasury_before = session.treasury
+    catalog = session.catalog()
+    weapon = next(it for it in catalog if it.category == "weapon")
+    armor = next(it for it in catalog if it.category == "armor")
+    notes = session.set_loadout(0, [weapon.item_id, armor.item_id])
+    assert {it.item_id for it in session.loadouts[0].items} == {weapon.item_id, armor.item_id}
+    assert session.treasury == treasury_before        # gold NOT touched
+    assert notes == []
+    # the SAME weapon can be given to another member (independent loadouts)
+    session.set_loadout(1, [weapon.item_id])
+    assert session.loadouts[1].items[0].item_id == weapon.item_id
+
+
+def test_set_loadout_skips_unknown_items_with_a_note():
+    import random
+    from src.game.crawl import CrawlSession
+    session = CrawlSession(party_size=1, pool=_pool(), rng=random.Random(1))
+    notes = session.set_loadout(0, ["does-not-exist"])
+    assert session.loadouts[0].items == []
+    assert any("unknown" in n.lower() for n in notes)

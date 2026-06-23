@@ -64,6 +64,27 @@ class CrawlSession:
                 loadout.remove(item_id)
                 return
 
+    def set_loadout(self, member: int, item_ids: list) -> list:
+        """Rebuild a member's loadout from item_ids -- the leader mirrors what a player bought
+        on their own device with their own gold. Structural rules (slot cap, two-handed) are
+        enforced; affordability is NOT (the player already paid client-side). Returns ASCII
+        notes for any item that could not be placed."""
+        catalog_by_id = {it.item_id: it for it in self.catalog()}
+        loadout = Loadout()
+        notes: list = []
+        for item_id in item_ids:
+            item = catalog_by_id.get(item_id)
+            if item is None:
+                notes.append(f"slot {member}: unknown item {item_id}")
+                continue
+            ok, reason = loadout.can_add(item)
+            if ok:
+                loadout.add(item)
+            else:
+                notes.append(f"slot {member}: skipped {item.name} ({reason})")
+        self.loadouts[member] = loadout
+        return notes
+
     # -- resolution --
     def party_gear(self) -> PartyGear:
         return PartyGear(
