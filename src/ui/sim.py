@@ -3,19 +3,19 @@
 
 Hotkeys (only active when enabled):
   H  toggle the hotkey help popup
-  R  auto-draft a full roster on a Draft screen
+  R  auto-draft a full roster (draft) / auto-buy weapon+armor then descend (shop)
   A  auto-fill a valid prediction on a Play screen
-  S  skip the current cinematic / advance the splash
-  F  fast-forward the current window (auto-predict straight to the cinematic)
+  S  skip the current cinematic / advance the splash / continue a recap
+  F  fast-forward the current window (auto-pick straight to resolution)
 """
 import pygame
 from src.ui.widgets import Popup
 
 HELP_LINES = [
     "H  show / hide this help",
-    "R  auto-draft 6 players",
+    "R  auto-draft / auto-buy + go",
     "A  auto-pick predictions",
-    "S  skip animation / advance",
+    "S  skip / continue",
     "F  fast-forward this window",
 ]
 

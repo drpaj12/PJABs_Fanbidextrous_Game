@@ -35,6 +35,18 @@ def test_round_trips_through_dict():
     assert again.match["home"] == "NED" and again.pool[0]["jersey"] == 9
 
 
+def test_from_dict_tolerates_malformed_window_picks():
+    # Party 0 is a long-lived shared test room; a stale session file can hold a window_picks
+    # of the wrong shape (e.g. a list from an older format). from_dict must not crash and must
+    # drop the garbage, keeping only well-formed dict entries.
+    base = Party.create(party_id=0, leader="drpaj").to_dict()
+    assert Party.from_dict({**base, "window_picks": ["abc", "def"]}).window_picks == {}
+    assert Party.from_dict({**base, "window_picks": "nonsense"}).window_picks == {}
+    mixed = {"0": {"w": 1, "preds": ["goal:1"]}, "1": ["not", "a", "dict"]}
+    assert Party.from_dict({**base, "window_picks": mixed}).window_picks == {
+        "0": {"w": 1, "preds": ["goal:1"]}}
+
+
 def test_member_lookup_is_case_insensitive():
     p = Party.create(party_id=0, leader="drpaj")
     assert p.member("DRPAJ") is p.members[0]

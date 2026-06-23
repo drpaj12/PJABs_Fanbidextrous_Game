@@ -22,6 +22,16 @@ def _empty_match() -> dict:
             "minute": 0, "status": "NS"}
 
 
+def _picks_dict(raw: object) -> dict:
+    """Coerce the relay's window_picks payload into the expected {slot_str: {...}} shape,
+    dropping anything malformed. Party 0 is a long-lived shared test room whose session file
+    can hold stale data from an older format; a non-dict payload (or a non-dict entry) must
+    never crash a joining client, so we keep only well-formed dict entries."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+
+
 @dataclass
 class Member:
     username: str
@@ -118,7 +128,7 @@ class Party:
             dungeon=d.get("dungeon"), log=list(d.get("log", [])),
             window_colors=list(d.get("window_colors", [])),
             resolved_through_window=int(d.get("resolved_through_window", 0)),
-            window_picks=dict(d.get("window_picks", {})),
+            window_picks=_picks_dict(d.get("window_picks", {})),
         )
 
 
