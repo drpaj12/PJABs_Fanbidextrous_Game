@@ -1,6 +1,7 @@
 # tests/test_dungeon.py
-from src.game.dungeon import (DungeonState, gate_step, monster_difficulty,
-                              monster_flavor, resolve_gate)
+from src.game.dungeon import (DungeonState, gate_step, monster_count,
+                              monster_difficulty, monster_flavor, monster_name,
+                              resolve_gate)
 
 
 class SeqRng:
@@ -23,19 +24,27 @@ def test_state_total_tiles_and_helpers():
     assert monster_difficulty(1, 1, 2) == 8        # 6 + 0 + 1*2 threat
 
 
-def test_monster_flavor_matches_difficulty_and_party_split():
+def test_monster_count_scales_with_party_size_and_threat():
+    assert monster_count(1, 1, 0) == 6                          # solo = 1x per-fighter
+    assert monster_count(1, 3, 0) == 18                         # full party = 3x
+    assert monster_count(2, 1, 0) == 8                          # half2 per-fighter = 8
+    assert monster_count(1, 1, 2) == 8                          # +1 per threat
+
+
+def test_monster_flavor_matches_count_and_party_split():
     f = monster_flavor(half=1, party_size=3, threat=0)
-    assert f["total"] == monster_difficulty(1, 3, 0)          # 8
-    assert f["yours"] == max(1, round(f["total"] / 3))         # round(8/3) = 3
+    assert f["total"] == monster_count(1, 3, 0)                 # 18
+    assert f["yours"] == max(1, round(f["total"] / 3))          # round(18/3) = 6
     assert f["name"] == "goblins"
-    assert f["text"] == "Your party is engaging 8 goblins, you will fight 3 of them."
+    assert f["text"] == "Your party is engaging 18 goblins, you will fight 6 of them."
 
 
 def test_monster_flavor_half2_name_and_solo_floor():
     f = monster_flavor(half=2, party_size=1, threat=0)
     assert f["name"] == "ogres"
-    assert f["total"] == monster_difficulty(2, 1, 0)
+    assert f["total"] == monster_count(2, 1, 0)                 # 8
     assert f["yours"] == f["total"]                            # solo fights them all
+    assert monster_name(2) == "ogres" and monster_name(1) == "goblins"
     # yours never drops below 1 even if total/party rounds down toward zero
     assert monster_flavor(half=1, party_size=99, threat=0)["yours"] >= 1
 

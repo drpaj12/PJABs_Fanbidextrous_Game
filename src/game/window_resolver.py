@@ -6,7 +6,8 @@ import random
 from dataclasses import dataclass, field
 
 from src.game.bands import Band, grade_progress, window_color
-from src.game.dungeon import DungeonState, gate_step, resolve_gate
+from src.game.dungeon import (DungeonState, gate_step, monster_count, monster_name,
+                              resolve_gate)
 from src.game.power import power_gain
 from src.game.treasury import gate_loot_gold, tile_gold
 from src.utils.constants import CONFIG, load_data
@@ -86,6 +87,10 @@ def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fig
     has_big_miss = False
     power_gained = 0
 
+    # The horde engaged this window is fixed by the threat the party walked in with (scaled to
+    # actual party size); graded tiles below slay monsters, leftovers carry forward.
+    engaged = monster_count(state.half, state.party_size, state.threat)
+
     for lines in fighter_lines:
         for stat in _PROGRESS:
             band = grade_progress(int(lines.get(stat, 0)), int(actuals.get(stat, 0)))
@@ -155,6 +160,16 @@ def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fig
                         log.append("  CRAWL  party downed -- half ends")
                     # A failed gate halts the party: remaining tiles this window are forfeited.
                     break
+
+    # Monsters slain = tiles advanced this window (capped at the engaged horde); any unslain
+    # carry into threat so next window's horde + gate difficulty grow ("allocated the ones
+    # left"). Stacks with the flat +1 a big miss already added above.
+    kills = min(engaged, max(0, tiles))
+    leftover = engaged - kills
+    if leftover > 0:
+        state.threat += leftover
+        log.append(f"  HORDE  {leftover} {monster_name(state.half)} unslain "
+                   f"-> threat {state.threat}")
 
     log.append(f"  DEPTH  {state.depth}/{state.total_tiles}")
     return WindowResult(tiles_advanced=tiles, power_gained=power_gained, color=color,

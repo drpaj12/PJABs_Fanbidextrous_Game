@@ -86,3 +86,40 @@ def test_gate_fail_costs_tiles_and_wound():
     # advanced to gate (8) then lost 5 tiles -> depth 3, one wound
     assert st.wounds == 1 and st.depth == 3
     assert any("FAIL" in line for line in res.log)
+
+
+# All-"off" predictions: diff 3-4 grades to the OFF band (step 0), so the party advances
+# zero tiles -- slaying none of the engaged horde.
+_OFF_LINES = {"goal": 0, "shot": 7, "corner": 5, "card": 5, "foul": 0}
+
+
+def test_unslain_monsters_carry_into_threat():
+    st = DungeonState(half=1, party_size=1)         # solo -> 1x6 = 6 goblins engaged
+    gear = PartyGear(weapon_bonus=5, armor_soak=0)
+    rng = SeqRng([6])
+    res = resolve_window(rng, st, gear, [_OFF_LINES], ACTUALS, "W1")
+    assert res.tiles_advanced == 0                  # nothing slain
+    assert st.threat == 6                            # whole engaged horde carries over
+    assert any("HORDE" in line and "unslain" in line for line in res.log)
+
+
+def test_overkill_leaves_no_leftover_threat():
+    st = DungeonState(half=1, party_size=1)         # 6 engaged, exact lines advance 12 tiles
+    gear = PartyGear(weapon_bonus=5, armor_soak=0)
+    rng = SeqRng([6])
+    res = resolve_window(rng, st, gear, [_exact_lines(0)], ACTUALS, "W1")
+    assert res.tiles_advanced == 12                 # >= 6 engaged
+    assert st.threat == 0                            # none left behind
+    assert not any("HORDE" in line for line in res.log)
+
+
+def test_big_miss_threat_stacks_with_unslain_carry():
+    st = DungeonState(half=1, party_size=1)         # 6 engaged
+    gear = PartyGear(weapon_bonus=5, armor_soak=0)
+    rng = SeqRng([6])
+    # shot big miss (-1 tile, +1 threat), the other three progress stats OFF (0 tiles)
+    lines = {"goal": 0, "shot": 99, "corner": 5, "card": 5, "foul": 0}
+    res = resolve_window(rng, st, gear, [lines], ACTUALS, "W1")
+    assert res.tiles_advanced == -1
+    # +1 from the big miss, +6 from the unslain horde
+    assert st.threat == 7

@@ -57,17 +57,32 @@ def gate_step(half: int) -> int:
 
 
 def monster_difficulty(half: int, party_size: int, threat: int) -> int:
+    """GATE dice target: the number a fighter's d(dice_sides)+bonuses must beat at a gate.
+    Scales gently with party size and threat. Distinct from monster_count (the horde size)."""
     base = _D["monster_base_difficulty_half1"] if half == 1 else _D["monster_base_difficulty_half2"]
     return int(base
                + _D["monster_difficulty_per_fighter"] * (party_size - 1)
                + _D["monster_difficulty_per_threat"] * threat)
 
 
+def monster_name(half: int) -> str:
+    return _D["monsters"]["half1_name"] if half == 1 else _D["monsters"]["half2_name"]
+
+
+def monster_count(half: int, party_size: int, threat: int) -> int:
+    """Number of monsters the party engages this window. Scales with ACTUAL party size --
+    solo fights 1x the per-fighter count, a full party 3x -- plus accumulated threat. The
+    window's graded tile advance slays this many; any not slain carry into threat next window
+    ('the party gets allocated the ones left')."""
+    per = _D["monster_per_fighter_half1"] if half == 1 else _D["monster_per_fighter_half2"]
+    return int(per * party_size + _D["monster_difficulty_per_threat"] * threat)
+
+
 def monster_flavor(half: int, party_size: int, threat: int) -> dict:
     """Per-window predict-phase flavor: how many monsters the party faces and how many fall
-    to this fighter. `total` is the gate difficulty; `yours` is the party-split share."""
-    total = monster_difficulty(half, party_size, threat)
-    name = _D["monsters"]["half1_name"] if half == 1 else _D["monsters"]["half2_name"]
+    to this fighter. `total` is the engaged horde (monster_count); `yours` is the party split."""
+    total = monster_count(half, party_size, threat)
+    name = monster_name(half)
     yours = max(1, round(total / max(1, party_size)))
     text = f"Your party is engaging {total} {name}, you will fight {yours} of them."
     return {"total": total, "yours": yours, "name": name, "text": text}

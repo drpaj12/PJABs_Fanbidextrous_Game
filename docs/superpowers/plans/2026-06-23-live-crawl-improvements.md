@@ -73,11 +73,11 @@
 - Preserve existing gate pass/fail/wound semantics; the carry-over is additive to threat, replacing the flat `+1 on big miss` (or layered with it -- decide in C1 and document).
 
 **Tasks:**
-- [ ] C1: Decide + write failing tests for the new total formula (solo 1xN, party 3xN), leftover -> threat carry-over.
-- [ ] C2: Implement scaling in `dungeon.py`; tests pass.
-- [ ] C3: Implement leftover->threat carry-over in `resolve_window`; tests pass.
-- [ ] C4: Update config keys; verify no magic numbers.
-- [ ] C5: pytest + `--dungeon`/`--party` smoke; append log.md.
+- [x] C1: Decided leftover STACKS with the +1 big-miss. Tests: monster_count scaling (solo 1xN, party 3xN, +threat), leftover->threat carry, overkill no-leftover, big-miss-stacks-with-carry.
+- [x] C2: Implemented `monster_count`/`monster_name` in `dungeon.py`; `monster_flavor` repointed to `monster_count`; tests pass.
+- [x] C3: Implemented leftover->threat carry-over in `resolve_window` (kills = min(engaged, tiles); leftover -> state.threat with HORDE log); tests pass.
+- [x] C4: Added `monster_per_fighter_half1/2` config keys + `_monster_comment`; no magic numbers.
+- [x] C5: pytest (330) + `--party` smoke OK (clean); appended log.md.
 
 ## Increment D: Per-window potion choice
 
@@ -106,5 +106,5 @@
 A (the reported bug) -> B (the visible picks-in confirmation) -> C (combat) -> D (potions). C and D both touch resolution/gear; B and D both touch the predict screen, so doing B before D keeps the predict-screen changes coherent.
 
 ## Open detail to confirm during build
-- C1: does leftover-as-threat REPLACE the flat `+1 threat on big miss`, or stack with it?
+- C1: RESOLVED -- leftover-as-threat STACKS with the flat `+1 threat on big miss` (both apply; a big miss that also leaves the horde unslain adds 1 + leftover).
 - A: during catch-up across the half boundary, is the H2 loadout simply the H1 loadout carried forward (no auto-spend of the 300g), with the player free to re-shop once caught up? (Assumed yes unless told otherwise.)
