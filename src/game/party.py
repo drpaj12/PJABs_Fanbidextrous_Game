@@ -87,6 +87,13 @@ class Party:
         self.members.append(Member(username=_norm(username), slot=slot))
         return slot, True
 
+    def all_picks_in(self, window: int) -> bool:
+        """True when every member has submitted picks for `window`."""
+        return all(
+            (entry := self.window_picks.get(str(m.slot))) is not None
+            and int(entry.get("w", -1)) == window
+            for m in self.members)
+
     def to_dict(self) -> dict:
         return {
             "party_id": self.party_id, "leader": self.leader, "phase": self.phase,
@@ -113,3 +120,46 @@ class Party:
             resolved_through_window=int(d.get("resolved_through_window", 0)),
             window_picks=dict(d.get("window_picks", {})),
         )
+
+
+def parse_preds(preds: list) -> dict:
+    """["goal:1", "shot:3"] -> {"goal": 1, "shot": 3}. Unknown codes and malformed tokens
+    are dropped (picks arrive over the wire)."""
+    out: dict = {}
+    for token in preds:
+        if not isinstance(token, str) or ":" not in token:
+            continue
+        code, _, raw = token.partition(":")
+        if code not in STAT_CODES:
+            continue
+        try:
+            out[code] = int(raw)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def preds_from_lines(lines: dict) -> list:
+    """Inverse of parse_preds: a stable 'code:line' list for every known stat."""
+    return [f"{code}:{int(lines.get(code, DEFAULT_LINES[code]))}" for code in STAT_CODES]
+
+
+def fighter_lines_from_picks(party: "Party", window: int) -> list:
+    """One prediction-line dict per member, ordered by slot. A member who has not submitted
+    (or submitted partial) picks for `window` is filled from DEFAULT_LINES so the leader can
+    always resolve."""
+    out: list = []
+    for member in sorted(party.members, key=lambda m: m.slot):
+        entry = party.window_picks.get(str(member.slot))
+        submitted = parse_preds(entry["preds"]) if entry and int(entry.get("w", -1)) == window else {}
+        out.append({**DEFAULT_LINES, **submitted})
+    return out
+
+
+def split_gold(total: int, n: int) -> list:
+    """Split a single gold reward equally among n members; any remainder goes to the lowest
+    slots first. split_gold(100, 3) -> [34, 33, 33]."""
+    if n <= 0:
+        return []
+    share, rem = divmod(int(total), n)
+    return [share + (1 if i < rem else 0) for i in range(n)]

@@ -1,4 +1,5 @@
-from src.game.party import Member, Party
+from src.game.party import (Member, Party, parse_preds, preds_from_lines,
+                            fighter_lines_from_picks, split_gold, DEFAULT_LINES)
 
 
 def test_create_puts_leader_at_slot_zero_with_default_fields():
@@ -60,3 +61,47 @@ def test_full_party_rejects_new_member_but_admits_existing():
     assert p.join_or_restore("c", max_size=3) == (None, False)
     assert len(p.members) == 3
     assert p.join_or_restore("drpaj", max_size=3) == (0, False)
+
+
+def test_parse_and_format_preds_round_trip():
+    lines = {"goal": 1, "shot": 3, "corner": 2, "card": 0, "foul": 5}
+    preds = preds_from_lines(lines)
+    assert "goal:1" in preds and "shot:3" in preds and len(preds) == 5
+    assert parse_preds(preds) == lines
+
+
+def test_parse_preds_drops_unknown_and_malformed():
+    assert parse_preds(["goal:2", "bogus:9", "garbage", "shot:x"]) == {"goal": 2}
+
+
+def test_fighter_lines_orders_by_slot_and_default_fills():
+    p = Party.create(party_id=0, leader="drpaj")     # slot 0
+    p.join_or_restore("alice", max_size=3)           # slot 1
+    p.window_picks = {"1": {"w": 2, "preds": ["goal:3", "shot:9"]}}
+    lines = fighter_lines_from_picks(p, window=2)
+    assert len(lines) == 2
+    assert lines[0] == DEFAULT_LINES                 # slot 0 did not submit
+    assert lines[1]["goal"] == 3 and lines[1]["shot"] == 9
+    assert lines[1]["corner"] == DEFAULT_LINES["corner"]
+
+
+def test_fighter_lines_ignores_other_windows():
+    p = Party.create(party_id=0, leader="drpaj")
+    p.window_picks = {"0": {"w": 1, "preds": ["goal:5"]}}
+    assert fighter_lines_from_picks(p, window=2) == [DEFAULT_LINES]
+
+
+def test_all_picks_in():
+    p = Party.create(party_id=0, leader="drpaj")
+    p.join_or_restore("alice", max_size=3)
+    p.window_picks = {"0": {"w": 1, "preds": ["goal:1"]}}
+    assert p.all_picks_in(window=1) is False
+    p.window_picks["1"] = {"w": 1, "preds": ["goal:2"]}
+    assert p.all_picks_in(window=1) is True
+
+
+def test_split_gold_is_equal_with_remainder_to_lowest_slots():
+    assert split_gold(90, 3) == [30, 30, 30]
+    assert split_gold(100, 3) == [34, 33, 33]   # remainder 1 -> slot 0
+    assert split_gold(7, 1) == [7]
+    assert split_gold(5, 0) == []
