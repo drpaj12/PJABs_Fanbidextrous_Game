@@ -67,3 +67,4 @@ Append one line per session. Never delete old entries.
 2026-06-22 | Task 12: PartyPlayScreen -- per-member dials (edit phase), poll+leader-resolve loop (wait phase), depth meter+window cells+log+scoreline (resolved phase); force_resolve() hook for LIVE boundary; 298 tests pass, headless 3-phase smoke OK | src/ui/screens/party_play_screen.py
 2026-06-22 | Task 13 DungeonPartyFlow SIM + launcher + --party | src/ui/flow.py src/main.py
 2026-06-22 | Task 14 LIVE party wiring (leader-fetched feed shared via relay, clock-driven windows) | src/ui/flow.py
+2026-06-22 | Task 14 fix: follower consumes shared fixture+pool from blob (no picker); half-2 clock re-anchored | src/ui/flow.py

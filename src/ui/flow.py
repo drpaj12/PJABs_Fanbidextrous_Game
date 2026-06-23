@@ -118,9 +118,16 @@ def _demo_script() -> dict:
 
 
 def _pool_from_feed(feed: MockFeed) -> list[DraftedAthlete]:
+    return _pool_from_rows(feed.lineups())
+
+
+def _pool_from_rows(rows: list[dict]) -> list[DraftedAthlete]:
+    """Build the draft pool from lineup-row dicts (athlete_id/name/broad_position/team/jersey).
+    Used by both the leader (rows from the live feed) and a follower (the same rows read back
+    from the shared party blob), so both clients derive an identical pool."""
     return [DraftedAthlete.create(athlete_id=r["athlete_id"], name=r["name"],
             broad_position=r["broad_position"], team=r["team"], jersey=int(r["jersey"]))
-            for r in feed.lineups()]
+            for r in rows]
 
 
 class Flow:
@@ -530,7 +537,11 @@ class DungeonPartyFlow:
         self.window = 1
         self._local_shop = None
         self.live = False
-        # LIVE wiring (set by attach_live); None/False in SIM mode.
+        # is_follower_live: a LIVE follower that must build its machinery from the shared blob
+        # (set by start_dungeon_party_live for non-lead clients). Distinct from self.live, which
+        # only flips True once attach_live / attach_live_from_blob has run.
+        self.is_follower_live = False
+        # LIVE wiring (set by attach_live / attach_live_from_blob); None/False in SIM mode.
         self.feed_client: Optional[FeedClient] = None
         self.live_feed: Optional[LiveFeed] = None
         self.fixture_id: int = 0
@@ -550,6 +561,32 @@ class DungeonPartyFlow:
         self.clock = clock
         self.feed = live_feed
         self.live = True
+
+    def attach_live_from_blob(self) -> bool:
+        """Follower LIVE wiring: build this client's live machinery from the leader's shared
+        party blob instead of resolving the fixture or polling the sports API. The leader has
+        already pushed fixture_id + kickoff_iso (and the lineup pool) into the blob; the
+        follower seeds a LiveFeed kickoff from kickoff_iso, attaches it with a fresh half-1
+        clock, and estimates kickoff_epoch from kickoff_iso. Returns True once attached.
+
+        Followers still hold a FeedClient(is_lead=False) but never call get_feed /
+        get_live_fixtures: leader_poll_feed early-returns for non-leaders, so the follower's
+        live feed stays empty and all display comes from the blob (coord.view()['match'])."""
+        if self.live:
+            return True
+        p = self.coord.party
+        if p is None or not p.fixture_id:
+            return False
+        feed = LiveFeed()
+        feed.seed_kickoff(p.kickoff_iso or "")
+        now_now = time.time()
+        secs = seconds_to_kickoff(feed.kickoff_iso(), now_now)
+        self.kickoff_epoch = now_now + secs if secs is not None else now_now
+        # feed_client is supplied by the caller (FeedClient is_lead=False); reuse it so the
+        # follower never constructs a lead feed client.
+        self.attach_live(self.feed_client, feed, int(p.fixture_id),
+                         HalfClock(_HALF_MIN, _WINDOW_MIN))
+        return True
 
     async def leader_poll_feed(self) -> None:
         """Leader only: fetch one relay snapshot, record it, and share the match summary
@@ -594,15 +631,55 @@ class DungeonPartyFlow:
         self.app.set_screen(SplashScreen(self.app, self._to_lobby, self.sim))
 
     def _to_lobby(self) -> None:
-        label = "Pick match" if self.live else "Start crawl"
+        # The leader picks the match BEFORE the lobby (FixtureSelectScreen runs first in the
+        # leader path), so the lobby button always STARTS the crawl -- it never picks. Labelling
+        # it "Pick match" would be misleading; keep "Start crawl" for both SIM and LIVE.
+        label = "Start crawl"
         self.app.set_screen(PartyLobbyScreen(
             self.app, self.coord, on_start=self._leader_start, on_advance=self._to_shop,
             start_label=label, sim=self.sim))
 
     def _leader_start(self) -> None:
-        asyncio.ensure_future(self.coord.leader_start())
+        asyncio.ensure_future(self._leader_share_then_start())
+
+    async def _leader_share_then_start(self) -> None:
+        """LIVE leader: publish the fixture + lineup pool into the blob BEFORE flipping the
+        lobby to shop, so a follower (who never resolves the fixture or polls the sports API)
+        can build its draft pool and shop catalog from the shared rows. SIM has no feed to
+        share and goes straight to leader_start."""
+        if self.live and self.live_feed is not None and self.live_feed.has_lineups():
+            match = {"home": self.live_feed.home_team(), "away": self.live_feed.away_team(),
+                     "home_goals": self.live_feed.home_goals(),
+                     "away_goals": self.live_feed.away_goals(),
+                     "minute": self.live_feed.current_minute(),
+                     "status": self.live_feed.status_short()}
+            await self.coord.leader_share_match(
+                match, pool_rows=self.live_feed.lineups(), fixture_id=self.fixture_id,
+                kickoff_iso=self.live_feed.kickoff_iso() or "")
+        await self.coord.leader_start()
+
+    def _sync_pool_from_blob(self) -> None:
+        """Follower path: the leader shared the lineup pool into the party blob; build (or
+        rebuild) the local draft/shop pool from those rows. The leader already holds a pool
+        from the feed, so only an empty local pool is replaced. Idempotent and guarded -- a
+        malformed row must never crash the shop."""
+        if self.pool:
+            return
+        rows = self.coord.party.pool if self.coord.party else []
+        if not rows:
+            return
+        try:
+            self.pool = _pool_from_rows(rows)
+        except (KeyError, TypeError, ValueError):
+            self.pool = []
 
     def _to_shop(self) -> None:
+        # Follower LIVE: attach this client's live machinery from the leader's shared blob
+        # (fixture + kickoff) before the first shop, so the play phase runs the live path with
+        # a correct clock. No-ops for the leader (already live) and for SIM.
+        if self.is_follower_live:
+            self.attach_live_from_blob()
+        self._sync_pool_from_blob()
         budget = max(1, self.coord.shop_budget())
         local = CrawlSession(party_size=1, pool=self.pool, rng=random.Random(_RNG_SEED),
                              half=self.coord.half(), treasury=budget)
@@ -683,7 +760,25 @@ class DungeonPartyFlow:
             await self.coord.leader_advance_half()
         else:
             await self.coord.refresh()
+        self._reanchor_half_two()
         self._to_shop()
+
+    def _reanchor_half_two(self) -> None:
+        """LIVE half 2: re-anchor the clock to absolute minutes 45-90 and re-estimate the
+        kickoff epoch, exactly as LiveFlow's launch_half(2) does (flow.py launch_half). Without
+        this the clock keeps start_minute=0, so live_actuals_for reads first-half minutes 0-45
+        in the second half and the editing-window boundary check runs off a first-half anchor.
+        The per-poll MatchClock self-corrects the estimate against the API minute."""
+        if not self.live or self.clock is None:
+            return
+        self.clock = HalfClock(_HALF_MIN, _WINDOW_MIN, start_minute=_HALF_MIN)
+        # Leader reads the live feed; a follower's feed is never polled, so it falls back to the
+        # match minute the leader shared into the blob.
+        minute = self.live_feed.current_minute() if (
+            self.live_feed and self.live_feed.current_minute()) else int(
+            self.coord.view().get("match", {}).get("minute", 0))
+        in_half = max(0, minute - _HALF_MIN)
+        self.kickoff_epoch = time.time() - in_half * 60
 
     async def _advance_then_finish(self) -> None:
         if self.coord.is_leader:
@@ -739,6 +834,30 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
                              feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead,
                              live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
+
+    # FOLLOWER PATH (Spec Step 3): a non-lead client must NOT run the fixture picker / resolve /
+    # lineup wait, and must NEVER resolve the fixture itself (two followers could otherwise pick
+    # different matches). Instead it joins the party with an EMPTY pool, sits in the lobby polling
+    # the relay, and once the leader's blob carries fixture_id + lineup pool it builds its live
+    # machinery FROM THE BLOB (see DungeonPartyFlow.attach_live_from_blob + _sync_pool_from_blob,
+    # invoked at _to_shop). The lobby auto-advances to shop when the leader flips the phase.
+    if not is_lead:
+        def picked_follower(party_number: int) -> None:
+            coord = PartyCoordinator(
+                relay=relay, party_id=party_number, username=username,
+                pool=[], actuals_fn=lambda w: flow.live_actuals_for(w))
+            flow = DungeonPartyFlow(app, LiveFeed(), [], coord, sim)
+            flow.feed_client = feed_client   # is_lead=False; never calls get_feed
+            flow.is_follower_live = True
+
+            async def go() -> None:
+                await coord.join()
+                flow.start()
+            asyncio.ensure_future(go())
+
+        app.set_screen(PartyScreen(app, username, picked_follower, sim))
+        return
+
     sched_cfg = _LIVE["schedule"]
     try:
         raw = load_data(f'{CONFIG["assets"]["data_dir"]}/{sched_cfg["file"]}')
