@@ -1105,6 +1105,9 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     def go_live() -> None:
         start_live_select(app, sim_mode=sim_mode, is_lead=is_lead, username=username)
 
+    # The "(simulated)" modes always play their recorded match deterministically
+    # (downstream sim_mode=True), but the PICKER inherits the launcher's sim_mode so a real
+    # web user (sim_mode=False) taps a game rather than having the first one auto-picked.
     def go_sim() -> None:
         start_sim_select(app, lambda path: start_simulation(app, path, sim_mode=True),
                          sim_mode=sim_mode)
