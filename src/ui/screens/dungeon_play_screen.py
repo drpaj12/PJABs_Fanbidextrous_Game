@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, LogList, draw_depth_meter, font
+from src.ui.widgets import Button, LogList, draw_depth_meter, font, wrap_text
 from src.ui.sim import SimMode
 from src.game.crawl import CrawlSession
-from src.game.dungeon import gate_step
+from src.game.dungeon import gate_step, monster_flavor
 from src.game.window_resolver import WindowResult
 from src.utils.asset_loader import load_icon
 from src.utils.constants import CONFIG, LAYOUT, load_data
@@ -150,6 +150,19 @@ class DungeonPlayScreen(Screen):
                          (r.x + 12, r.y + 12))
             surface.blit(sf.render("-", True, _C["white"]), (r.right - 104, r.y + 10))
             surface.blit(sf.render("+", True, _C["white"]), (r.right - 44, r.y + 10))
+        self._draw_flavor(surface, self._stat_rect(len(_STATS) - 1).bottom
+                          + LAYOUT.i("dp_section_gap", 24))
+
+    def _draw_flavor(self, surface: pygame.Surface, y: int) -> None:
+        """Window flavor: how many monsters the party faces this descent."""
+        st = self.session.state
+        flavor = monster_flavor(st.half, st.party_size, st.threat)
+        ff = font(LAYOUT.i("dp_flavor_size", 17))
+        m = LAYOUT.i("screen_margin", 20)
+        max_w = self.app.screen.get_width() - 2 * m
+        for line in wrap_text(flavor["text"], ff, max_w):
+            surface.blit(ff.render(line, True, _C["orange"]), (m, y))
+            y += LAYOUT.i("dp_flavor_line_gap", 24)
 
     def _draw_resolved(self, surface: pygame.Surface) -> None:
         self.log.draw(surface)
@@ -162,6 +175,26 @@ class DungeonPlayScreen(Screen):
             pygame.Rect(m, meter_y, self.app.screen.get_width() - 2 * m, 0),
             self.session.state.depth, self.session.state.total_tiles,
             gate_step(self.session.half), self.result.color if self.result else "orange")
+        meter_h = LAYOUT.i("depth_label_size", 14) + 4 + LAYOUT.i("depth_meter_h", 26)
+        self._draw_results_strip(surface, m, meter_y + meter_h
+                                 + LAYOUT.i("dp_section_gap", 24))
+
+    def _draw_results_strip(self, surface: pygame.Surface, x: int, y: int) -> None:
+        """Per-prediction feedback: 'label: you P / was A' tinted green/orange/red, with an
+        underline under correct (green) predictions -- the dungeon's draft-style readout."""
+        if not self.result or not self.result.stat_results:
+            return
+        rf = font(LAYOUT.i("dp_result_size", 17))
+        gap = LAYOUT.i("dp_result_line_gap", 26)
+        for sr in self.result.stat_results:
+            col = _C.get(sr.color_key, _C["orange"])
+            text = f"{sr.label}: you {sr.predicted} / was {sr.actual}"
+            img = rf.render(text, True, col)
+            surface.blit(img, (x, y))
+            if sr.color_key == "green":
+                uy = y + img.get_height() + 1
+                pygame.draw.line(surface, col, (x, uy), (x + img.get_width(), uy), 2)
+            y += gap
 
     def _draw_window_cells(self, surface: pygame.Surface, x: int, y: int) -> None:
         h = LAYOUT.i("dp_cells_h", 28)

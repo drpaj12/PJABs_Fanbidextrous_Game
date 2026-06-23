@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 import pygame
 
 from src.ui.screens.base import Screen
-from src.ui.widgets import Button, LogList, draw_depth_meter, font
+from src.ui.widgets import Button, LogList, draw_depth_meter, font, wrap_text
 from src.ui.sim import SimMode
 from src.sync.party_coordinator import PartyCoordinator
-from src.game.dungeon import gate_step
+from src.game.dungeon import gate_step, monster_flavor
+from src.game.window_resolver import build_stat_results
 from src.utils.constants import CONFIG, LAYOUT, load_data
 
 if TYPE_CHECKING:
@@ -145,6 +146,7 @@ class PartyPlayScreen(Screen):
         surface.blit(stf.render(status, True, _C["white"]), (m, LAYOUT.i("dp_status_y", 60)))
         if self.phase == "edit":
             self._draw_dials(surface)
+            self._draw_flavor(surface, v)
             self.action_btn.draw(surface, font(LAYOUT.i("dp_stat_size", 19)))
         elif self.phase == "wait":
             wf = font(LAYOUT.i("pplay_wait_size", 20))
@@ -167,6 +169,18 @@ class PartyPlayScreen(Screen):
             surface.blit(sf.render("-", True, _C["white"]), (r.right - 104, r.y + 10))
             surface.blit(sf.render("+", True, _C["white"]), (r.right - 44, r.y + 10))
 
+    def _draw_flavor(self, surface: pygame.Surface, v: dict) -> None:
+        """Window flavor: how many monsters the party faces this descent."""
+        size = max(1, len(v.get("members", [])))
+        flavor = monster_flavor(self.coord.half(), size, int(v.get("threat", 0)))
+        ff = font(LAYOUT.i("dp_flavor_size", 17))
+        m = LAYOUT.i("screen_margin", 20)
+        max_w = self.app.screen.get_width() - 2 * m
+        y = self._stat_rect(len(_STATS) - 1).bottom + LAYOUT.i("dp_section_gap", 24)
+        for line in wrap_text(flavor["text"], ff, max_w):
+            surface.blit(ff.render(line, True, _C["orange"]), (m, y))
+            y += LAYOUT.i("dp_flavor_line_gap", 24)
+
     def _draw_resolved(self, surface: pygame.Surface, v: dict) -> None:
         self.log.draw(surface)
         m = LAYOUT.i("screen_margin", 20)
@@ -179,3 +193,24 @@ class PartyPlayScreen(Screen):
         color = v["window_colors"][-1] if v["window_colors"] else "orange"
         draw_depth_meter(surface, pygame.Rect(m, meter_y, surface.get_width() - 2 * m, 0),
                          v["depth"], v["total"], gate_step(self.coord.half()), color)
+        meter_h = LAYOUT.i("depth_label_size", 14) + 4 + LAYOUT.i("depth_meter_h", 26)
+        self._draw_results_strip(surface, v, m, meter_y + meter_h
+                                 + LAYOUT.i("dp_section_gap", 24))
+
+    def _draw_results_strip(self, surface: pygame.Surface, v: dict, x: int, y: int) -> None:
+        """Per-prediction feedback for THIS player's own picks vs the leader-pushed actuals:
+        'label: you P / was A' tinted green/orange/red, underlined when correct (green).
+        Followers without pushed actuals fall back to the depth/colors view (no strip)."""
+        actuals = v.get("actuals") or {}
+        if not actuals:
+            return
+        rf = font(LAYOUT.i("dp_result_size", 17))
+        gap = LAYOUT.i("dp_result_line_gap", 26)
+        for sr in build_stat_results(self.lines, actuals):
+            col = _C.get(sr.color_key, _C["orange"])
+            img = rf.render(f"{sr.label}: you {sr.predicted} / was {sr.actual}", True, col)
+            surface.blit(img, (x, y))
+            if sr.color_key == "green":
+                uy = y + img.get_height() + 1
+                pygame.draw.line(surface, col, (x, uy), (x + img.get_width(), uy), 2)
+            y += gap

@@ -85,12 +85,12 @@
 - Modify: `src/ui/screens/shop_screen.py` (replace overlapping single-row buy with card rows + tap-to-zoom)
 - Verify: headless construct smoke (no pytest — pygame UI)
 
-- [ ] **Step 1:** Add `ItemDetail` to `widgets.py`: constructor `(rect)` with a bottom `Button` (label set by caller to "Buy"/"Sell"). `draw(surface, item, treasury)` shows the category icon (`load_icon(item.category)`), item name, a line `f"{item.category}  {'*'*item.stars}  {item.price}g"`, the armor slot when present (`item.armor_slot`), the effect summary, and the player's current gold. Reuse `wrap_text` for the effect line.
-- [ ] **Step 2:** In `shop_screen.py` replace `_draw_row` content with a compact card: icon (left) + `item.name` + a short subtitle (`category + stars`), and an OWNED tint — NO right-aligned "tap to buy"/"OWNED" text (that overlap is the bug). Keep the existing scroll + viewport.
-- [ ] **Step 3:** Add zoom state mirroring `draft_screen.py` (`zoom_idx`): tapping a row sets `zoom_idx`; while zoomed, draw `ItemDetail` over the list with the button labelled "Buy" (if not owned) or "Sell" (if owned); tapping the button calls the existing buy/sell path; any other tap closes the zoom. Preserve the SIM auto-buy hotkey.
-- [ ] **Step 4:** Headless construct smoke: instantiate `ShopScreen` with a CrawlSession catalog, drive a tap on a row -> zoom open, tap Buy -> item bought (treasury decremented), draw both phases without traceback. Confirm no text is drawn in the row's right gutter (the old overlap region).
-- [ ] **Step 5:** `.venv/Scripts/python -m pytest tests/ -q`; confirm `src/main.py --dungeon` launches and the shop renders.
-- [ ] **Step 6:** `log.md`; commit.
+- [x] **Step 1:** Add `ItemDetail` to `widgets.py`: constructor `(rect)` with a bottom `Button` (label set by caller to "Buy"/"Sell"). `draw(surface, item, treasury)` shows the category icon (`load_icon(item.category)`), item name, a line `f"{item.category}  {'*'*item.stars}  {item.price}g"`, the armor slot when present (`item.armor_slot`), the effect summary, and the player's current gold. Reuse `wrap_text` for the effect line.
+- [x] **Step 2:** In `shop_screen.py` replace `_draw_row` content with a compact card: icon (left) + `item.name` + a short subtitle (`category + stars`), and an OWNED tint — NO right-aligned "tap to buy"/"OWNED" text (that overlap is the bug). Keep the existing scroll + viewport.
+- [x] **Step 3:** Add zoom state mirroring `draft_screen.py` (`zoom_idx`): tapping a row sets `zoom_idx`; while zoomed, draw `ItemDetail` over the list with the button labelled "Buy" (if not owned) or "Sell" (if owned); tapping the button calls the existing buy/sell path; any other tap closes the zoom. Preserve the SIM auto-buy hotkey.
+- [x] **Step 4:** Headless construct smoke: instantiate `ShopScreen` with a CrawlSession catalog, drive a tap on a row -> zoom open, tap Buy -> item bought (treasury decremented), draw both phases without traceback. Confirm no text is drawn in the row's right gutter (the old overlap region).
+- [x] **Step 5:** `.venv/Scripts/python -m pytest tests/ -q`; confirm `src/main.py --dungeon` launches and the shop renders.
+- [x] **Step 6:** `log.md`; commit.
 
 **Two-stage review (crux):** spec compliance, then code quality.
 

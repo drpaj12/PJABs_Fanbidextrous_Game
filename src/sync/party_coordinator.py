@@ -39,6 +39,7 @@ class PartyCoordinator:
         self.party: Optional[Party] = None
         self.session: Optional[CrawlSession] = None   # authoritative, leader only
         self.last_gold: int = 0                       # gold from the most recent resolution
+        self.last_actuals: dict = {}                  # actuals of the most recent resolution
 
     # -- identity / read -----------------------------------------------------
 
@@ -88,6 +89,8 @@ class PartyCoordinator:
             "total": int(total_tiles_game(size)),
             "power": int(d.get("power", 0)),
             "wounds": int(d.get("wounds", 0)),
+            "threat": int(d.get("threat", 0)),
+            "actuals": dict(d.get("actuals", {})),
             "log": list(p.log if p else []),
             "window_colors": list(p.window_colors if p else []),
             "members": [(m.username, m.treasury) for m in p.members] if p else [],
@@ -164,8 +167,10 @@ class PartyCoordinator:
         self._build_session()
         fighter_lines = fighter_lines_from_picks(self.party, window)
         label = f"H{self.session.half} W{window}"
-        result = self.session.resolve_window(fighter_lines, self.actuals_fn(window), label)
+        actuals = self.actuals_fn(window)
+        result = self.session.resolve_window(fighter_lines, actuals, label)
         self.last_gold = result.gold
+        self.last_actuals = dict(actuals)
         await self._push_after_resolve(window)
         return True
 
@@ -229,7 +234,8 @@ class PartyCoordinator:
             members.append(d)
         # cleared_prev is included so followers can compute the correct H2 percent.
         # DungeonState.from_dict ignores unknown keys, so the extra field is safe.
-        dungeon_payload = {**s.state.to_dict(), "cleared_prev": s.cleared_prev_halves}
+        dungeon_payload = {**s.state.to_dict(), "cleared_prev": s.cleared_prev_halves,
+                           "actuals": dict(self.last_actuals)}
         await self.relay.party_push(self.party_id, self.username, {
             "dungeon": dungeon_payload, "log": list(s.log),
             "window_colors": list(s.window_colors), "members": members,

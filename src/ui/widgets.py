@@ -200,6 +200,24 @@ class LogList:
         if event.type == pygame.MOUSEWHEEL and self.rect.collidepoint(pygame.mouse.get_pos()):
             self.scroll = max(0, self.scroll - event.y * 30)
 
+    @staticmethod
+    def _line_color(line: str) -> list[int]:
+        """Color a crawl-log line by the outcome tokens the resolver embeds.
+
+        The resolver tags each line: per-prediction lines end in a color word
+        '(GREEN)'/'(ORANGE)'/'(RED)', gate lines say '-> PASS'/'-> FAIL', and a
+        Power gain starts with 'POWER'. 'GOAL' lines stay accent (existing rule)."""
+        stripped = line.strip()
+        if "(RED)" in line or "BIG MISS" in line or "-> FAIL" in line or "downed" in line:
+            return _C["red"]
+        if "(GREEN)" in line:
+            return _C["green"]
+        if "(ORANGE)" in line:
+            return _C["orange"]
+        if "-> PASS" in line or stripped.startswith("POWER") or stripped.startswith("GOAL"):
+            return _C["accent"]
+        return _C["text"]
+
     def draw(self, surface: pygame.Surface) -> None:
         line_h = LAYOUT.i("play_log_line_size", 16) + 6
         f = font(LAYOUT.i("play_log_line_size", 16))
@@ -209,8 +227,7 @@ class LogList:
         for line in reversed(self.entries):
             if y < self.rect.top - line_h:
                 break
-            color = _C["accent"] if line.startswith("GOAL") else _C["text"]
-            surface.blit(f.render(line, True, color), (self.rect.x + 4, y))
+            surface.blit(f.render(line, True, self._line_color(line)), (self.rect.x + 4, y))
             y -= line_h
         surface.set_clip(prev)
 

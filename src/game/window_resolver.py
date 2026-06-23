@@ -41,6 +41,21 @@ class StatResult:
     color_key: str
 
 
+def build_stat_results(lines: dict, actuals: dict) -> list[StatResult]:
+    """Grade one fighter's predicted `lines` against `actuals` into per-stat outcomes, in the
+    canonical stat order. Pure -- shared by the resolver and the play screens (which grade the
+    local player's own picks against the pushed actuals)."""
+    results: list[StatResult] = []
+    for code in STAT_CODES:
+        predicted = int(lines.get(code, 0))
+        actual = int(actuals.get(code, 0))
+        band = grade_progress(predicted, actual)
+        results.append(StatResult(code=code, label=_STAT_LABELS[code],
+                                   predicted=predicted, actual=actual,
+                                   band_label=band.label, color_key=_color_key(band)))
+    return results
+
+
 @dataclass
 class PartyGear:
     """Party-wide combat aids for this window (best weapon/armor across fighters, one queued
@@ -88,14 +103,7 @@ def resolve_window(rng: random.Random, state: DungeonState, gear: PartyGear, fig
     # Goal is graded for display only (its tile/power effect is unchanged above).
     first_lines = fighter_lines[0] if fighter_lines else {}
     used_actuals = {code: int(actuals.get(code, 0)) for code in STAT_CODES}
-    stat_results: list = []
-    for code in STAT_CODES:
-        predicted = int(first_lines.get(code, 0))
-        actual = used_actuals[code]
-        band = grade_progress(predicted, actual)
-        stat_results.append(StatResult(code=code, label=_STAT_LABELS[code],
-                                        predicted=predicted, actual=actual,
-                                        band_label=band.label, color_key=_color_key(band)))
+    stat_results = build_stat_results(first_lines, used_actuals)
 
     log.append(f"{window_label}  party advance +{tiles} ({color.upper()})")
     for sr in stat_results:
