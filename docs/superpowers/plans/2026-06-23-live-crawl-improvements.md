@@ -53,10 +53,10 @@
 - Wait phase: replace generic "Waiting..." with a "Picks in" header plus a Windows panel (`W1: G 1  S 2 ...`), newest-first, with the window currently being resolved underlined (mirrors `live_play_screen._draw_locked_panel`).
 
 **Tasks:**
-- [ ] B1: Add per-stat lock state + tri-color dials to the predict phase.
-- [ ] B2: Add the "Picks in" + Windows panel to the wait phase, underlining the resolving window.
-- [ ] B3: Layout keys; no magic numbers.
-- [ ] B4: pytest + `--party` smoke; append log.md.
+- [x] B1: Add per-stat lock state + tri-color dials to the predict phase. (locked/touched sets; body-tap toggles lock; +/- arms orange; green=locked dot + accent border.)
+- [x] B2: Add the "Picks in" + Windows panel to the wait phase, underlining the resolving window. (pick_history threaded from the flow so it survives per-window screen rebuilds.)
+- [x] B3: Layout keys (pplay_lock_circle_r, pplay_panel_*); no magic numbers.
+- [x] B4: pytest (326) + headless render check + `--party` smoke; append log.md.
 
 ## Increment C: Monster scaling + leftover carry-over
 

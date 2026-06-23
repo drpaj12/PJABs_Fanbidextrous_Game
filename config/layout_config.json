@@ -245,5 +245,10 @@
   "pplay_score_size": 16,
   "pplay_score_y": 38,
   "pplay_wait_size": 20,
-  "pplay_wait_y": 420
+  "pplay_wait_y": 420,
+  "pplay_lock_circle_r": 9,
+  "pplay_panel_pad": 14,
+  "pplay_panel_line_gap": 26,
+  "pplay_panel_title_size": 20,
+  "pplay_panel_line_size": 17
 }

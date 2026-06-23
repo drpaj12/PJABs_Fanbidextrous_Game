@@ -32,6 +32,7 @@ class PartyPlayScreen(Screen):
                  on_continue: Callable[[], None], require_all: bool = True,
                  on_poll: Optional[Callable[[], Awaitable[None]]] = None,
                  can_resolve: Optional[Callable[[int], bool]] = None,
+                 pick_history: Optional[dict] = None,
                  sim: Optional[SimMode] = None) -> None:
         super().__init__(app)
         self.coord = coord
@@ -40,6 +41,13 @@ class PartyPlayScreen(Screen):
         self.on_continue = on_continue
         self.require_all = require_all
         self.on_poll = on_poll
+        # Per-stat lock state for the predict dials (mirrors live_play_screen): green = locked
+        # (the bet), orange = adjusted but not locked, red = untouched.
+        self.locked: set = set()
+        self.touched: set = set()
+        # Crawl-long record of THIS player's submitted picks per window, owned by the flow so it
+        # survives the per-window screen rebuilds; the wait-phase "Picks in" panel reads it.
+        self.pick_history = pick_history if pick_history is not None else {}
         # LIVE data gate: the leader resolves this window only when can_resolve(window) is True
         # (the live feed actually covers the window's end minute), so the actuals query reads
         # real per-window deltas instead of stale zeros. None in SIM -> resolve as soon as the
@@ -102,12 +110,27 @@ class PartyPlayScreen(Screen):
                 self.on_continue()
 
     def _tap_stat(self, code: str, x: int, r: pygame.Rect) -> None:
-        if x > r.right - 56:
+        if x > r.right - 56:           # "+" stepper -> adjust (orange)
             self.lines[code] += 1
-        elif x > r.right - 112:
+            self._arm(code)
+        elif x > r.right - 112:        # "-" stepper -> adjust (orange)
             self.lines[code] = max(0, self.lines[code] - 1)
+            self._arm(code)
+        else:                          # row body -> toggle the lock (green = the bet)
+            if code in self.locked:
+                self.locked.discard(code)
+            else:
+                self.locked.add(code)
+                self.touched.discard(code)
+
+    def _arm(self, code: str) -> None:
+        """A stepper tap adjusts the line, marking the stat orange (touched, not yet locked)."""
+        self.touched.add(code)
+        self.locked.discard(code)
 
     def _submit(self) -> None:
+        # Record this window's picks for the "Picks in" panel before sending them upstream.
+        self.pick_history[self.window] = dict(self.lines)
         asyncio.ensure_future(self.coord.submit_pick(self.window, dict(self.lines)))
         self.phase = "wait"
 
@@ -182,32 +205,68 @@ class PartyPlayScreen(Screen):
             self._draw_flavor(surface, v)
             self.action_btn.draw(surface, font(LAYOUT.i("dp_stat_size", 19)))
         elif self.phase == "wait":
-            wf = font(LAYOUT.i("pplay_wait_size", 20))
-            if self.can_resolve is not None and not self.can_resolve(self.window):
-                # LIVE: picks are locked but the match has not yet reached this window's end.
-                # Gated here -- no resolution and no Continue until real data arrives.
-                msg = "Picks in. Waiting for the match..."
-            elif self.coord.is_leader:
-                msg = "Resolving..."
-            else:
-                msg = "Waiting for the party..."
-            w = wf.render(msg, True, _C["accent"])
-            surface.blit(w, w.get_rect(center=(surface.get_width() // 2,
-                                               LAYOUT.i("pplay_wait_y", 420))))
+            self._draw_picks_panel(surface)
         else:
             self._draw_resolved(surface, v)
             self.action_btn.draw(surface, font(LAYOUT.i("dp_stat_size", 19)))
 
     def _draw_dials(self, surface: pygame.Surface) -> None:
         sf = font(LAYOUT.i("dp_stat_size", 19))
+        cr = LAYOUT.i("pplay_lock_circle_r", 9)
         for i, s in enumerate(_STATS):
+            code = s["code"]
             r = self._stat_rect(i)
+            locked = code in self.locked
             pygame.draw.rect(surface, _C["surface"], r, border_radius=8)
-            pygame.draw.rect(surface, _C["border"], r, width=2, border_radius=8)
-            surface.blit(sf.render(f"{s['label']}: {self.lines[s['code']]}", True, _C["white"]),
-                         (r.x + 12, r.y + 12))
+            # Accent border when locked; tri-color dot: green locked / orange touched / red new.
+            pygame.draw.rect(surface, _C["accent"] if locked else _C["border"], r,
+                             width=2, border_radius=8)
+            dot = (_C["green"] if locked
+                   else _C["orange"] if code in self.touched else _C["red"])
+            pygame.draw.circle(surface, dot, (r.x + 18, r.centery), cr)
+            surface.blit(sf.render(f"{s['label']}: {self.lines[code]}", True, _C["white"]),
+                         (r.x + 38, r.y + 12))
             surface.blit(sf.render("-", True, _C["white"]), (r.right - 104, r.y + 10))
             surface.blit(sf.render("+", True, _C["white"]), (r.right - 44, r.y + 10))
+
+    def _draw_picks_panel(self, surface: pygame.Surface) -> None:
+        """Wait phase: 'Picks in' + a Windows panel listing each window's submitted picks,
+        newest-first, with the window currently being resolved drawn white + underlined. A
+        gated status line under the panel says what we are waiting on (mirrors the previous
+        game's locked-windows panel)."""
+        m = LAYOUT.i("screen_margin", 20)
+        pad = LAYOUT.i("pplay_panel_pad", 14)
+        gap = LAYOUT.i("pplay_panel_line_gap", 26)
+        top = LAYOUT.i("dp_content_top", 92)
+        tf = font(LAYOUT.i("pplay_panel_title_size", 20))
+        lf = font(LAYOUT.i("pplay_panel_line_size", 17))
+        order = [s["code"] for s in _STATS]
+        rows = 1 + len(self.pick_history)              # title + one row per submitted window
+        box = pygame.Rect(m, top, surface.get_width() - 2 * m, pad * 2 + (rows + 1) * gap)
+        pygame.draw.rect(surface, _C["surface"], box, border_radius=8)
+        pygame.draw.rect(surface, _C["border"], box, width=2, border_radius=8)
+        x, y = box.x + pad, box.y + pad
+        surface.blit(tf.render("Picks in", True, _C["accent"]), (x, y))
+        for w in sorted(self.pick_history, reverse=True):
+            y += gap
+            lines = self.pick_history[w]
+            picks = "  ".join(f"{c[:3].upper()} {lines[c]}" for c in order if c in lines)
+            resolving = (w == self.window)
+            img = lf.render(f"W{w}: {picks}", True,
+                            _C["white"] if resolving else _C["text_dim"])
+            surface.blit(img, (x, y))
+            if resolving:
+                uy = y + img.get_height() + 1
+                pygame.draw.line(surface, _C["white"], (x, uy),
+                                 (x + img.get_width(), uy), 1)
+        # Gated status under the windows list.
+        if self.can_resolve is not None and not self.can_resolve(self.window):
+            msg = "Waiting for the match..."
+        elif self.coord.is_leader:
+            msg = "Resolving..."
+        else:
+            msg = "Waiting for the party..."
+        surface.blit(lf.render(msg, True, _C["accent"]), (x, y + gap))
 
     def _draw_flavor(self, surface: pygame.Surface, v: dict) -> None:
         """Window flavor: how many monsters the party faces this descent."""

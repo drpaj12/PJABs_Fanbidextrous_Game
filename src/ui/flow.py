@@ -565,6 +565,9 @@ class DungeonPartyFlow:
         self.clock: Optional[HalfClock] = None
         self.kickoff_epoch: float = 0.0   # set by start_dungeon_party_live before play
         self._play_screen: Optional[PartyPlayScreen] = None
+        # This player's submitted picks per window, owned here so the per-window play screens
+        # share one crawl-long history for the "Picks in" panel.
+        self._pick_history: dict = {}
 
     # -- LIVE mode wiring (Task 14) -----------------------------------------
 
@@ -725,7 +728,8 @@ class DungeonPartyFlow:
             self._play_window_live()
             return
         self.app.set_screen(PartyPlayScreen(self.app, self.coord, self.window, self._label(),
-                                            self._on_continue, require_all=True, sim=self.sim))
+                                            self._on_continue, require_all=True,
+                                            pick_history=self._pick_history, sim=self.sim))
 
     def _play_window_live(self) -> None:
         """LIVE window entry. Schedules the async catch-up driver: fast-forward past any window
@@ -767,7 +771,8 @@ class DungeonPartyFlow:
         screen = PartyPlayScreen(self.app, self.coord, self.window, self._label(),
                                  self._on_continue, require_all=False,
                                  on_poll=self._live_poll,
-                                 can_resolve=self._live_data_ready, sim=self.sim)
+                                 can_resolve=self._live_data_ready,
+                                 pick_history=self._pick_history, sim=self.sim)
         self._play_screen = screen
         self.app.set_screen(screen)
 
