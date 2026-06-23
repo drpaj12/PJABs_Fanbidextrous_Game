@@ -1,5 +1,6 @@
 from src.game.party import (Member, Party, parse_preds, preds_from_lines,
-                            fighter_lines_from_picks, split_gold, DEFAULT_LINES)
+                            fighter_lines_from_picks, used_consumables_from_picks,
+                            split_gold, DEFAULT_LINES)
 
 
 def test_create_puts_leader_at_slot_zero_with_default_fields():
@@ -89,6 +90,22 @@ def test_fighter_lines_ignores_other_windows():
     p = Party.create(party_id=0, leader="drpaj")
     p.window_picks = {"0": {"w": 1, "preds": ["goal:5"]}}
     assert fighter_lines_from_picks(p, window=2) == [DEFAULT_LINES]
+
+
+def test_used_consumables_orders_by_slot_and_empties_non_submitters():
+    p = Party.create(party_id=0, leader="drpaj")     # slot 0
+    p.join_or_restore("alice", max_size=3)           # slot 1
+    p.window_picks = {"1": {"w": 2, "preds": ["goal:3"], "use": ["sccr-3"]}}
+    used = used_consumables_from_picks(p, window=2)
+    assert used == [[], ["sccr-3"]]                  # slot 0 submitted nothing
+
+
+def test_used_consumables_ignores_other_windows_and_missing_key():
+    p = Party.create(party_id=0, leader="drpaj")
+    p.window_picks = {"0": {"w": 1, "preds": ["goal:5"], "use": ["sccr-3"]}}
+    assert used_consumables_from_picks(p, window=2) == [[]]   # window mismatch
+    p.window_picks = {"0": {"w": 2, "preds": ["goal:5"]}}     # no "use" key
+    assert used_consumables_from_picks(p, window=2) == [[]]
 
 
 def test_all_picks_in():

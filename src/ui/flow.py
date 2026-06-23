@@ -690,6 +690,9 @@ class DungeonPartyFlow:
             return
         try:
             self.pool = _pool_from_rows(rows)
+            # Keep the coordinator's pool aligned so screens reading coord.pool (e.g. the
+            # predict-screen potion picker) see the shared lineup on followers too.
+            self.coord.pool = self.pool
         except (KeyError, TypeError, ValueError):
             self.pool = []
 

@@ -15,7 +15,8 @@ import random
 from typing import Callable, Optional
 
 from src.game.crawl import CrawlSession
-from src.game.party import (Party, fighter_lines_from_picks, preds_from_lines, split_gold)
+from src.game.party import (Party, fighter_lines_from_picks, preds_from_lines, split_gold,
+                            used_consumables_from_picks)
 from src.game.score import percent_complete, total_tiles_game
 from src.utils.constants import CONFIG
 
@@ -103,9 +104,12 @@ class PartyCoordinator:
     async def submit_loadout(self, item_ids: list, treasury: int) -> None:
         await self.relay.party_loadout(self.party_id, self.username, item_ids, int(treasury))
 
-    async def submit_pick(self, window: int, lines: dict) -> None:
+    async def submit_pick(self, window: int, lines: dict,
+                          use: Optional[list] = None) -> None:
+        """Submit this player's picks for `window`. `use` is the list of consumable item_ids
+        the player toggled to deploy this window (empty = hold them in inventory)."""
         await self.relay.party_pick(self.party_id, self.username, window,
-                                    preds_from_lines(lines))
+                                    preds_from_lines(lines), use=list(use or []))
 
     # -- leader-authoritative actions ----------------------------------------
 
@@ -166,12 +170,14 @@ class PartyCoordinator:
             return False
         self._build_session()
         fighter_lines = fighter_lines_from_picks(self.party, window)
+        used = used_consumables_from_picks(self.party, window)
         label = f"H{self.session.half} W{window}"
         actuals = self.actuals_fn(window)
-        result = self.session.resolve_window(fighter_lines, actuals, label)
+        result = self.session.resolve_window(fighter_lines, actuals, label,
+                                             used_consumables=used)
         self.last_gold = result.gold
         self.last_actuals = dict(actuals)
-        await self._push_after_resolve(window)
+        await self._push_after_resolve(window, used)
         return True
 
     async def leader_catch_up(self, through_window: int) -> int:
@@ -237,16 +243,23 @@ class PartyCoordinator:
             self.session = CrawlSession(party_size=len(self.party.members),
                                         pool=self.pool, rng=random.Random(self.seed))
 
-    async def _push_after_resolve(self, window: int) -> None:
+    async def _push_after_resolve(self, window: int,
+                                  used_consumables: Optional[list] = None) -> None:
         """Push the authoritative post-resolve state: dungeon, log, window_colors, each
-        member's updated treasury share, and a flag to clear the now-stale window_picks."""
+        member's updated treasury share, and a flag to clear the now-stale window_picks.
+        Consumables a member deployed this window are stripped from their pushed inventory so
+        followers see the potion gone."""
         s = self.session
         shares = split_gold(self.last_gold, len(self.party.members))
+        used_sets = used_consumables or []
         # Safe to push members here (see INVARIANT note in leader_start): resolve runs
         # during play phase when followers write only window_picks, not member fields.
         members = []
         for m in sorted(self.party.members, key=lambda x: x.slot):
             d = m.to_dict()
+            spent = set(used_sets[m.slot]) if m.slot < len(used_sets) else set()
+            if spent:
+                d["items"] = [i for i in d["items"] if i not in spent]
             d["treasury"] = m.treasury + shares[m.slot]
             d["wounds"] = s.state.wounds
             d["alive"] = s.state.wounds < _MAX_WOUNDS

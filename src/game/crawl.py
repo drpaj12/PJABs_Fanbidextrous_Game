@@ -5,6 +5,7 @@ feeds in per-window actuals; this module owns all economy / loadout / resolution
 so it stays fully testable. rng is injected (random.Random). Zero pygame, zero feed access."""
 import random
 from dataclasses import dataclass, field
+from typing import Optional
 
 from src.game.dungeon import DungeonState
 from src.game.items import Item, build_catalog
@@ -86,32 +87,46 @@ class CrawlSession:
         return notes
 
     # -- resolution --
-    def party_gear(self) -> PartyGear:
+    def _used_sets(self, used_consumables: Optional[list]) -> list:
+        """Normalize the per-fighter 'use this window' lists to one item_id set per loadout."""
+        used = used_consumables or []
+        return [set(used[i]) if i < len(used) else set()
+                for i in range(len(self.loadouts))]
+
+    def party_gear(self, used_consumables: Optional[list] = None) -> PartyGear:
+        """Best weapon/armor/reroll across the party, plus the combined value of ONLY the
+        consumables each fighter chose to USE this window (`used_consumables[slot]` = item_ids).
+        A held-but-unused potion contributes nothing -- it stays in inventory for later."""
+        used = self._used_sets(used_consumables)
+        consumable_value = sum(
+            it.effect.get("value", 0)
+            for slot, l in enumerate(self.loadouts) for it in l.items
+            if it.category == "consumable" and it.item_id in used[slot])
         return PartyGear(
             weapon_bonus=max((l.best_weapon_bonus() for l in self.loadouts), default=0),
             armor_soak=max((l.best_armor_soak() for l in self.loadouts), default=0),
             has_reroll=any(l.has_reroll() for l in self.loadouts),
-            consumable_value=sum(it.effect.get("value", 0)
-                                 for l in self.loadouts for it in l.items
-                                 if it.category == "consumable"))
+            consumable_value=consumable_value)
 
-    def resolve_window(self, fighter_lines: list, actuals: dict,
-                       window_label: str) -> WindowResult:
-        gear = self.party_gear()
+    def resolve_window(self, fighter_lines: list, actuals: dict, window_label: str,
+                       used_consumables: Optional[list] = None) -> WindowResult:
+        gear = self.party_gear(used_consumables)
         result = resolve_window(self.rng, self.state, gear, fighter_lines,
                                 actuals, window_label)
         self.treasury += result.gold
         self.window_index += 1
         self.window_colors.append(result.color)
         self.log.extend(result.log)
-        self._drop_consumables()
+        self._drop_consumables(used_consumables)
         return result
 
-    def _drop_consumables(self) -> None:
-        """Consumables persist for one round only; spent or not, they leave after the window."""
-        for loadout in self.loadouts:
+    def _drop_consumables(self, used_consumables: Optional[list] = None) -> None:
+        """Consumables persist in inventory until USED; only the potions a fighter deployed
+        this window leave afterward. Unused potions carry forward."""
+        used = self._used_sets(used_consumables)
+        for slot, loadout in enumerate(self.loadouts):
             for it in list(loadout.items):
-                if it.persist == "round":
+                if it.persist == "round" and it.item_id in used[slot]:
                     loadout.remove(it.item_id)
 
     # -- half / score --

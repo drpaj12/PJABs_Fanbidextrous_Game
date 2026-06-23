@@ -250,5 +250,16 @@
   "pplay_panel_pad": 14,
   "pplay_panel_line_gap": 26,
   "pplay_panel_title_size": 20,
-  "pplay_panel_line_size": 17
+  "pplay_panel_line_size": 17,
+  "pplay_potion_top": 470,
+  "pplay_potion_label_size": 16,
+  "pplay_potion_row_h": 40,
+  "pplay_potion_row_gap": 6,
+  "pplay_potion_size": 17,
+  "pplay_zoom_w": 300,
+  "pplay_zoom_h": 220,
+  "pplay_zoom_pad": 18,
+  "pplay_zoom_title_size": 22,
+  "pplay_zoom_body_size": 17,
+  "pplay_zoom_btn_h": 52
 }

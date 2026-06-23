@@ -22,9 +22,10 @@ class FakeRelay:
     async def party_state(self, party):
         return {"success": True, "party": self.blob}
 
-    async def party_pick(self, party, username, window, preds):
+    async def party_pick(self, party, username, window, preds, use=None):
         p = Party.from_dict(self.blob)
-        p.window_picks[str(p.member(username).slot)] = {"w": window, "preds": preds}
+        p.window_picks[str(p.member(username).slot)] = {
+            "w": window, "preds": preds, "use": list(use or [])}
         self.blob = p.to_dict()
         return {"success": True}
 
@@ -97,6 +98,48 @@ def test_full_window_round_trip_resolves_and_followers_see_depth():
         asyncio.run(c.refresh())
     assert lead.resolved_through() == 1 and b.resolved_through() == 1
     assert b.view()["depth"] > 0 and b.view()["depth"] == lead.view()["depth"]
+
+
+def _consumable_id(pool):
+    from src.game.items import build_catalog
+    return next(it.item_id for it in build_catalog(pool, 1, 1.0) if it.category == "consumable")
+
+
+def _setup_solo_with_consumable(relay, pool, cons_id):
+    """Leader-only party that bought one consumable, reconciled into play."""
+    lead = _coord(relay, "drpaj", pool)
+    _join_all(lead)
+    asyncio.run(lead.leader_start())
+    asyncio.run(lead.refresh())
+    asyncio.run(lead.submit_loadout([cons_id], lead.shop_budget()))
+    asyncio.run(lead.leader_try_reconcile_shop())
+    asyncio.run(lead.refresh())
+    return lead
+
+
+def test_used_potion_is_consumed_from_inventory_on_resolve():
+    relay, pool = FakeRelay(), _pool()
+    cons_id = _consumable_id(pool)
+    lead = _setup_solo_with_consumable(relay, pool, cons_id)
+    asyncio.run(lead.submit_pick(1, {"goal": 1, "shot": 3, "corner": 3, "card": 1, "foul": 4},
+                                 use=[cons_id]))
+    asyncio.run(lead.refresh())
+    asyncio.run(lead.leader_try_resolve(1))
+    asyncio.run(lead.refresh())
+    assert cons_id not in lead.me().items                  # deployed -> gone
+    assert cons_id not in [it.item_id for it in lead.session.loadouts[0].items]
+
+
+def test_unused_potion_persists_in_inventory_after_resolve():
+    relay, pool = FakeRelay(), _pool()
+    cons_id = _consumable_id(pool)
+    lead = _setup_solo_with_consumable(relay, pool, cons_id)
+    asyncio.run(lead.submit_pick(1, {"goal": 1, "shot": 3, "corner": 3, "card": 1, "foul": 4}))
+    asyncio.run(lead.refresh())
+    asyncio.run(lead.leader_try_resolve(1))
+    asyncio.run(lead.refresh())
+    assert cons_id in lead.me().items                      # held, not used -> kept
+    assert cons_id in [it.item_id for it in lead.session.loadouts[0].items]
 
 
 def test_window_gold_is_split_into_each_players_pot():

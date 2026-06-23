@@ -94,11 +94,11 @@
 - The pick payload submitted to the coordinator carries the potion choice so the leader's resolution applies it.
 
 **Tasks:**
-- [ ] D1: Write failing tests: potion persists unused; consumed only when used; gear reflects only the chosen potion.
-- [ ] D2: Implement inventory persistence + conditional consume in `crawl.py`; tests pass.
-- [ ] D3: Carry the potion choice through the coordinator pick payload.
-- [ ] D4: Add the zoom-in USE toggle UI to the predict phase.
-- [ ] D5: pytest + `--party` smoke; append log.md.
+- [x] D1: Tests: potion persists unused, consumed only when used, party_gear counts only used (test_crawl); used_consumables_from_picks ordering (test_party); relay `use` payload (test_relay_client); coordinator consumes-on-use / persists-unused (test_party_coordinator).
+- [x] D2: crawl.py: party_gear(used_consumables)/resolve_window(used_consumables)/_drop_consumables(used_consumables) -- consumables persist until USED, only deployed ones contribute value and drop.
+- [x] D3: Pick payload carries `use` (relay_client.party_pick + PHP action_party_pick + coordinator.submit_pick); leader_try_resolve applies used_consumables_from_picks and strips spent potions from each member's pushed inventory.
+- [x] D4: Predict-screen potion chips + zoom-in USE toggle (mirrors draft PlayerDetail); _sync_pool_from_blob aligns coord.pool so followers see their potions. New layout keys pplay_potion_*/pplay_zoom_*.
+- [x] D5: pytest (337) + headless potion render/toggle/submit check + `--party` smoke OK; appended log.md.
 
 ---
 

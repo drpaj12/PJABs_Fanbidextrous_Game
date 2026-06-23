@@ -5,7 +5,7 @@ JSON POST bodies tagged with a "type" field. Transport is injectable for tests a
 pygbag/WASM fetch backend.
 """
 import json
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 
 class Transport(Protocol):
@@ -97,9 +97,9 @@ class RelayClient:
         return json.loads(await self._t.get(self._party_url("party_state", party)))
 
     async def party_pick(self, party: int, username: str, window: int,
-                         preds: list[str]) -> dict[str, Any]:
+                         preds: list[str], use: Optional[list[str]] = None) -> dict[str, Any]:
         body = json.dumps({"type": "party_pick", "username": username,
-                           "window": window, "preds": preds})
+                           "window": window, "preds": preds, "use": list(use or [])})
         return json.loads(await self._t.post(self._party_url("party_pick", party), body))
 
     async def party_loadout(self, party: int, username: str, item_ids: list[str],

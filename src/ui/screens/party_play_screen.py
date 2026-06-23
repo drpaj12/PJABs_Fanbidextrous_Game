@@ -16,6 +16,7 @@ from src.ui.widgets import (Button, LogList, ScrollButtons, draw_depth_meter,
 from src.ui.sim import SimMode
 from src.sync.party_coordinator import PartyCoordinator
 from src.game.dungeon import gate_step, monster_flavor
+from src.game.items import build_catalog
 from src.game.window_resolver import build_stat_results
 from src.utils.constants import CONFIG, LAYOUT, load_data
 
@@ -56,6 +57,11 @@ class PartyPlayScreen(Screen):
         self.sim = sim
         self.phase = "edit"
         self.lines = {s["code"]: s["default_line"] for s in _STATS}
+        # Held potions the player can deploy THIS window. use_potions = item_ids toggled ON;
+        # potion_zoom = item_id of the zoom-in card currently open (None = no overlay).
+        self.use_potions: set = set()
+        self.potion_zoom: Optional[str] = None
+        self._potions = self._held_potions()
         self._polling = False
         self._elapsed = _POLL
         self._logged = 0
@@ -83,6 +89,39 @@ class PartyPlayScreen(Screen):
         w = self.app.screen.get_width() - 2 * m
         return pygame.Rect(m, top + i * self._stat_step(), w, LAYOUT.i("dp_stat_row_h", 48))
 
+    def _held_potions(self) -> list:
+        """This player's held consumables (built from the shared lineup pool + their own item
+        ids). Each may be deployed for the current window via the USE toggle."""
+        me = self.coord.me()
+        if me is None:
+            return []
+        held = list(me.items)
+        catalog = {it.item_id: it for it in build_catalog(self.coord.pool, self.coord.half())}
+        return [catalog[i] for i in held if i in catalog and catalog[i].category == "consumable"]
+
+    def _potion_rect(self, i: int) -> pygame.Rect:
+        m = LAYOUT.i("screen_margin", 20)
+        top = LAYOUT.i("pplay_potion_top", 470)
+        step = LAYOUT.i("pplay_potion_row_h", 40) + LAYOUT.i("pplay_potion_row_gap", 6)
+        w = self.app.screen.get_width() - 2 * m
+        return pygame.Rect(m, top + i * step, w, LAYOUT.i("pplay_potion_row_h", 40))
+
+    def _potion_at(self, pos: tuple) -> Optional[str]:
+        for i, it in enumerate(self._potions):
+            if self._potion_rect(i).collidepoint(pos):
+                return it.item_id
+        return None
+
+    def _zoom_box(self) -> pygame.Rect:
+        w, h = LAYOUT.i("pplay_zoom_w", 300), LAYOUT.i("pplay_zoom_h", 220)
+        sw, sh = self.app.screen.get_size()
+        return pygame.Rect((sw - w) // 2, (sh - h) // 2, w, h)
+
+    def _zoom_btn_rect(self) -> pygame.Rect:
+        box, pad = self._zoom_box(), LAYOUT.i("pplay_zoom_pad", 18)
+        bh = LAYOUT.i("pplay_zoom_btn_h", 52)
+        return pygame.Rect(box.x + pad, box.bottom - pad - bh, box.width - 2 * pad, bh)
+
     def handle(self, event: pygame.event.Event) -> None:
         if self.phase == "edit":
             if self.sim and self.sim.is_key(event, pygame.K_f):
@@ -90,8 +129,18 @@ class PartyPlayScreen(Screen):
                 return
             if event.type != pygame.MOUSEBUTTONDOWN:
                 return
+            # Potion zoom overlay intercepts all taps: USE toggles deployment, anything closes.
+            if self.potion_zoom is not None:
+                if self._zoom_btn_rect().collidepoint(event.pos):
+                    self._toggle_potion(self.potion_zoom)
+                self.potion_zoom = None
+                return
             if self.action_btn.hit(event.pos):
                 self._submit()
+                return
+            pid = self._potion_at(event.pos)
+            if pid is not None:
+                self.potion_zoom = pid
                 return
             for i, s in enumerate(_STATS):
                 r = self._stat_rect(i)
@@ -128,10 +177,18 @@ class PartyPlayScreen(Screen):
         self.touched.add(code)
         self.locked.discard(code)
 
+    def _toggle_potion(self, item_id: str) -> None:
+        """Toggle whether this held potion is deployed for the current window."""
+        if item_id in self.use_potions:
+            self.use_potions.discard(item_id)
+        else:
+            self.use_potions.add(item_id)
+
     def _submit(self) -> None:
         # Record this window's picks for the "Picks in" panel before sending them upstream.
         self.pick_history[self.window] = dict(self.lines)
-        asyncio.ensure_future(self.coord.submit_pick(self.window, dict(self.lines)))
+        asyncio.ensure_future(self.coord.submit_pick(self.window, dict(self.lines),
+                                                     use=sorted(self.use_potions)))
         self.phase = "wait"
 
     def force_resolve(self) -> None:
@@ -203,7 +260,10 @@ class PartyPlayScreen(Screen):
         if self.phase == "edit":
             self._draw_dials(surface)
             self._draw_flavor(surface, v)
+            self._draw_potions(surface)
             self.action_btn.draw(surface, font(LAYOUT.i("dp_stat_size", 19)))
+            if self.potion_zoom is not None:
+                self._draw_potion_zoom(surface)
         elif self.phase == "wait":
             self._draw_picks_panel(surface)
         else:
@@ -279,6 +339,53 @@ class PartyPlayScreen(Screen):
         for line in wrap_text(flavor["text"], ff, max_w):
             surface.blit(ff.render(line, True, _C["orange"]), (m, y))
             y += LAYOUT.i("dp_flavor_line_gap", 24)
+
+    def _draw_potions(self, surface: pygame.Surface) -> None:
+        """Held-potion chips (tap to zoom). A deployed potion is tinted green with 'USED';
+        a held-but-idle one stays neutral. Nothing drawn when the player holds no potions."""
+        if not self._potions:
+            return
+        m = LAYOUT.i("screen_margin", 20)
+        lf = font(LAYOUT.i("pplay_potion_label_size", 16))
+        surface.blit(lf.render("Potions (tap to deploy this window)", True, _C["text_dim"]),
+                     (m, LAYOUT.i("pplay_potion_top", 470) - lf.get_height() - 4))
+        pf = font(LAYOUT.i("pplay_potion_size", 17))
+        for i, it in enumerate(self._potions):
+            r = self._potion_rect(i)
+            on = it.item_id in self.use_potions
+            pygame.draw.rect(surface, _C["surface"], r, border_radius=8)
+            pygame.draw.rect(surface, _C["green"] if on else _C["border"], r,
+                             width=2, border_radius=8)
+            val = it.effect.get("value", 0)
+            surface.blit(pf.render(f"{it.name}  (+{val})", True, _C["white"]),
+                         (r.x + 12, r.centery - pf.get_height() // 2))
+            tag = "USED" if on else "TAP"
+            timg = pf.render(tag, True, _C["green"] if on else _C["text_dim"])
+            surface.blit(timg, (r.right - timg.get_width() - 12,
+                                r.centery - timg.get_height() // 2))
+
+    def _draw_potion_zoom(self, surface: pygame.Surface) -> None:
+        """Zoom-in item card with a USE toggle (mirrors the draft player-detail overlay)."""
+        it = next((p for p in self._potions if p.item_id == self.potion_zoom), None)
+        if it is None:
+            return
+        box = self._zoom_box()
+        pad = LAYOUT.i("pplay_zoom_pad", 18)
+        pygame.draw.rect(surface, _C["surface"], box, border_radius=10)
+        pygame.draw.rect(surface, _C["accent"], box, width=2, border_radius=10)
+        tf = font(LAYOUT.i("pplay_zoom_title_size", 22))
+        bf = font(LAYOUT.i("pplay_zoom_body_size", 17))
+        x, y = box.x + pad, box.y + pad
+        surface.blit(tf.render(it.name, True, _C["white"]), (x, y))
+        y += tf.get_height() + 8
+        val = it.effect.get("value", 0)
+        for line in wrap_text(f"Deploy for +{val} on this window's gate roll. Consumed on use.",
+                              bf, box.width - 2 * pad):
+            surface.blit(bf.render(line, True, _C["text_dim"]), (x, y))
+            y += bf.get_height() + 2
+        on = it.item_id in self.use_potions
+        btn = Button(self._zoom_btn_rect(), "Cancel deploy" if on else "USE this window")
+        btn.draw(surface, bf)
 
     def _draw_resolved(self, surface: pygame.Surface, v: dict) -> None:
         # Resolution summary first (cells -> depth meter -> per-prediction strip), top-down,

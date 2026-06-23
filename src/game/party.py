@@ -156,6 +156,21 @@ def fighter_lines_from_picks(party: "Party", window: int) -> list:
     return out
 
 
+def used_consumables_from_picks(party: "Party", window: int) -> list:
+    """One list of consumable item_ids per member (ordered by slot) that the member chose to
+    USE this window via the predict-screen toggle. Empty for members who did not submit picks
+    for `window` (or submitted before the 'use' field existed). Parallel to
+    fighter_lines_from_picks so the leader can apply each fighter's potion at resolution."""
+    out: list = []
+    for member in sorted(party.members, key=lambda m: m.slot):
+        entry = party.window_picks.get(str(member.slot))
+        if entry and int(entry.get("w", -1)) == window:
+            out.append([str(x) for x in entry.get("use", [])])
+        else:
+            out.append([])
+    return out
+
+
 def split_gold(total: int, n: int) -> list:
     """Split a single gold reward equally among n members; any remainder goes to the lowest
     slots first. split_gold(100, 3) -> [34, 33, 33]."""

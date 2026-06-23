@@ -77,13 +77,31 @@ def test_resolve_window_advances_depth_logs_and_banks_gold():
     assert any("H1 W1" in line for line in s.log)
 
 
-def test_consumables_are_dropped_after_each_window():
+def test_unused_consumable_persists_in_inventory():
+    """A potion sits in inventory until the player chooses to USE it -- resolving a window
+    without deploying it must NOT drop it."""
     s = _session()
     cons = next(it for it in s.catalog() if it.category == "consumable")
     s.buy(0, cons)
-    assert any(it.category == "consumable" for it in s.loadouts[0].items)
     s.resolve_window([{"goal": 0, "shot": 0, "corner": 0, "card": 0, "foul": 0}], {}, "H1 W1")
-    assert not any(it.category == "consumable" for it in s.loadouts[0].items)
+    assert any(it.item_id == cons.item_id for it in s.loadouts[0].items)
+
+
+def test_used_consumable_is_consumed_after_the_window():
+    s = _session()
+    cons = next(it for it in s.catalog() if it.category == "consumable")
+    s.buy(0, cons)
+    s.resolve_window([{"goal": 0, "shot": 0, "corner": 0, "card": 0, "foul": 0}], {},
+                     "H1 W1", used_consumables=[[cons.item_id]])
+    assert not any(it.item_id == cons.item_id for it in s.loadouts[0].items)
+
+
+def test_party_gear_counts_only_used_consumables():
+    s = _session()
+    cons = next(it for it in s.catalog() if it.category == "consumable")
+    s.buy(0, cons)
+    assert s.party_gear().consumable_value == 0                       # not deployed
+    assert s.party_gear([[cons.item_id]]).consumable_value == cons.effect["value"]
 
 
 def test_begin_second_half_carries_power_resets_depth_and_window():

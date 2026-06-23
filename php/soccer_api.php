@@ -228,6 +228,7 @@ function action_party_pick(int $party): void {
     $picks[$slot] = [
         'w'     => (int)($input['window'] ?? 0),
         'preds' => array_values((array)($input['preds'] ?? [])),
+        'use'   => array_values((array)($input['use'] ?? [])),
     ];
     $p['window_picks'] = $picks;
     write_party($party, $p);

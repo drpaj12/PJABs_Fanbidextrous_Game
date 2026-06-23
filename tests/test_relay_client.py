@@ -69,13 +69,22 @@ def test_party_state_is_a_get():
     assert "action=party_state" in t.gets[0] and "party=1" in t.gets[0]
 
 
-def test_party_pick_carries_window_and_preds():
+def test_party_pick_carries_window_preds_and_potion_use():
     t = _FakeTransport()
     client = RelayClient(base_url="http://x", transport=t)
-    asyncio.run(client.party_pick(party=0, username="a", window=2, preds=["goal:1", "shot:3"]))
+    asyncio.run(client.party_pick(party=0, username="a", window=2,
+                                  preds=["goal:1", "shot:3"], use=["sccr-3"]))
     url, body = t.posts[0]
     assert "action=party_pick" in url
     assert '"window": 2' in body and "goal:1" in body
+    assert "sccr-3" in body and '"use"' in body
+
+
+def test_party_pick_use_defaults_to_empty():
+    t = _FakeTransport()
+    client = RelayClient(base_url="http://x", transport=t)
+    asyncio.run(client.party_pick(party=0, username="a", window=1, preds=["goal:1"]))
+    assert '"use": []' in t.posts[0][1]
 
 
 def test_party_loadout_carries_items_and_treasury():
