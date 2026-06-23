@@ -68,3 +68,4 @@ Append one line per session. Never delete old entries.
 2026-06-22 | Task 13 DungeonPartyFlow SIM + launcher + --party | src/ui/flow.py src/main.py
 2026-06-22 | Task 14 LIVE party wiring (leader-fetched feed shared via relay, clock-driven windows) | src/ui/flow.py
 2026-06-22 | Task 14 fix: follower consumes shared fixture+pool from blob (no picker); half-2 clock re-anchored | src/ui/flow.py
+2026-06-22 | Plan 2 complete: live co-op dungeon party (per-player economy, leader-authoritative resolution, party model+relay+coordinator, SIM+LIVE flows, 3 screens, smoke) | src/game/party.py, src/game/dungeon.py, src/game/crawl.py, src/sync/relay_client.py, src/sync/party_coordinator.py, php/soccer_api.php, src/ui/screens/party_screen.py, src/ui/screens/party_lobby_screen.py, src/ui/screens/party_play_screen.py, src/ui/flow.py, src/main.py, config/*.json, TOOLS/smoke_party.py
