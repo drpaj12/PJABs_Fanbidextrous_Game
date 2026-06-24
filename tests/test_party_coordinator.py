@@ -3,46 +3,10 @@ import asyncio
 from src.game.athlete import DraftedAthlete
 from src.game.party import Party
 from src.sync.party_coordinator import PartyCoordinator
-
-
-class FakeRelay:
-    """In-memory stand-in for RelayClient with the same async party_* surface."""
-    def __init__(self):
-        self.blob = None
-
-    async def party_join(self, party, username):
-        if self.blob is None:
-            self.blob = Party.create(party, leader=username).to_dict()
-            return {"success": True, "slot": 0, "is_leader": True}
-        p = Party.from_dict(self.blob)
-        slot, _ = p.join_or_restore(username, max_size=3)
-        self.blob = p.to_dict()
-        return {"success": True, "slot": slot, "is_leader": p.is_leader(username)}
-
-    async def party_state(self, party):
-        return {"success": True, "party": self.blob}
-
-    async def party_pick(self, party, username, window, preds, use=None):
-        p = Party.from_dict(self.blob)
-        p.window_picks[str(p.member(username).slot)] = {
-            "w": window, "preds": preds, "use": list(use or [])}
-        self.blob = p.to_dict()
-        return {"success": True}
-
-    async def party_loadout(self, party, username, item_ids, treasury):
-        p = Party.from_dict(self.blob)
-        m = p.member(username)
-        m.items, m.treasury, m.ready = item_ids, treasury, True
-        self.blob = p.to_dict()
-        return {"success": True}
-
-    async def party_push(self, party, username, state):
-        d = dict(self.blob)
-        if state.pop("clear_picks", False):
-            d["window_picks"] = {}
-        d.update(state)
-        self.blob = d
-        return {"success": True}
+# LocalRelay is the production in-process relay (the SOLO crawl uses it). It is byte-for-byte
+# the old in-memory FakeRelay these tests were written against, so the coordinator suite now
+# exercises the real solo transport rather than a duplicate test double.
+from src.sync.local_relay import LocalRelay as FakeRelay
 
 
 def _pool(n=22):

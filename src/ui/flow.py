@@ -60,6 +60,7 @@ from src.ui.screens.party_screen import PartyScreen
 from src.ui.screens.party_lobby_screen import PartyLobbyScreen
 from src.ui.screens.party_play_screen import PartyPlayScreen
 from src.sync.relay_client import RelayClient
+from src.sync.local_relay import LocalRelay
 from src.sync.party_coordinator import PartyCoordinator
 
 if TYPE_CHECKING:
@@ -91,6 +92,9 @@ _RESYNC_THRESHOLD = CONFIG["live"]["resync_threshold_seconds"]
 _WINDOWS_PER_HALF = CONFIG["game"]["windows_per_half"]
 _DUNGEON_PARTY_SIZE = CONFIG["game"]["dungeon_party_size"]
 _SIMS_DIR = _LAUNCHER["simulations_dir"]
+# Fixed party id for the SOLO crawl: with an in-process LocalRelay the id is cosmetic (the
+# blob lives in this process), so there is nothing to share and no party-number screen.
+_SOLO_PARTY_ID = 0
 
 
 def _demo_pool() -> list[DraftedAthlete]:
@@ -880,14 +884,17 @@ class DungeonPartyFlow:
 
 
 def start_dungeon_party(app: "App", username: str, sim_rel_path: str,
-                        sim_mode: bool = True) -> None:
-    """SIM cooperative party: a recorded match drives deterministic per-window actuals on
-    every client; windows advance manually. The username (from UsernameScreen) is the party
-    credential. LIVE entry is start_dungeon_party_live (Task 14)."""
+                        sim_mode: bool = True, solo: bool = False) -> None:
+    """Recorded-match dungeon crawl: a replay feed drives deterministic per-window actuals;
+    windows advance manually (SIM hotkeys step through fast). solo=True runs it as a party of
+    one over an in-process LocalRelay -- no network, no party-number screen -- so the base
+    mechanics are testable without the co-op layer. solo=False keeps the networked party
+    transport for when co-op is re-enabled."""
     feed = ReplayFeed.from_file(sim_rel_path)
     pool = _pool_from_feed(feed)
     sim = SimMode(sim_mode)
-    relay = RelayClient(CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
+    relay = LocalRelay() if solo else RelayClient(
+        CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
 
     def picked(party_number: int) -> None:
         coord = PartyCoordinator(relay=relay, party_id=party_number, username=username,
@@ -901,25 +908,37 @@ def start_dungeon_party(app: "App", username: str, sim_rel_path: str,
 
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
-    app.set_screen(PartyScreen(app, username, picked, sim))
+    if solo:
+        picked(_SOLO_PARTY_ID)          # party of one; no party-number entry
+    else:
+        app.set_screen(PartyScreen(app, username, picked, sim))
 
 
 def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
-                             sim_mode: bool = False) -> None:
-    """LIVE cooperative party: the leader fetches the real match feed THROUGH the PHP relay
-    (FeedClient is_lead) and shares the match summary + lineup pool into the party blob; the
-    match clock drives the window boundaries. Followers NEVER call the sports API -- they read
-    the relay cache for the pre-game wait and render the crawl from the leader's shared blob.
+                             sim_mode: bool = False, solo: bool = False) -> None:
+    """LIVE dungeon crawl on the real match feed (lineups, score, clock drive the windows).
 
-    Reuses the full live pre-game stack from start_live: party number (PartyScreen) ->
-    fixture picker (FixtureSelectScreen) -> real-id resolution (LiveResolveScreen) -> lineup
-    wait (LiveWaitScreen). Once lineups arrive the lineup pool is built from the feed, a
-    PartyCoordinator + DungeonPartyFlow are constructed, the live feed/clock are attached, and
-    the flow runs (lobby -> shop -> 3 clock-driven windows per half)."""
+    solo=True (the deployed default) runs it as a party of one over an in-process LocalRelay:
+    the player is always the leader, so they fetch the feed directly and resolve their own
+    windows -- there is no relay coordination channel, no follower reconcile wait, and no
+    party-number screen. This is the path that removes the co-op "wait forever" hang. The live
+    MATCH feed (FeedClient) is a separate channel and is still polled exactly as before.
+
+    solo=False keeps the networked co-op behaviour for when the party layer is re-enabled: the
+    leader shares the match summary + lineup pool into the PHP party blob and followers render
+    from it without ever calling the sports API.
+
+    Reuses the live pre-game stack from start_live: fixture picker (FixtureSelectScreen) ->
+    real-id resolution (LiveResolveScreen) -> lineup wait (LiveWaitScreen). Once lineups
+    arrive the pool is built from the feed, a PartyCoordinator + DungeonPartyFlow are built,
+    the live feed/clock are attached, and the flow runs (lobby -> shop -> 3 windows per half)."""
+    if solo:
+        is_lead = True                  # the solo player always polls the feed
     sim = SimMode(sim_mode)
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
-    relay = RelayClient(CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
+    relay = LocalRelay() if solo else RelayClient(
+        CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
     feed_client = FeedClient(CONFIG["relay"]["base_url"],
                              feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead,
                              live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
@@ -987,7 +1006,10 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
                         flow.start()
                     asyncio.ensure_future(go())
 
-                app.set_screen(PartyScreen(app, username, picked, sim))
+                if solo:
+                    picked(_SOLO_PARTY_ID)      # party of one; no party-number entry
+                else:
+                    app.set_screen(PartyScreen(app, username, picked, sim))
 
             app.set_screen(LiveWaitScreen(
                 app, feed, feed_client, real_id, target_minute=None,
@@ -1170,11 +1192,12 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
     # (sim_mode=False) taps a game rather than having the first one auto-picked.
     def go_party() -> None:
         start_sim_select(app, lambda path: start_dungeon_party(app, username, path,
-                                                               sim_mode=sim_mode),
+                                                               sim_mode=sim_mode, solo=True),
                          sim_mode=sim_mode)
 
     def go_party_live() -> None:
-        start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode)
+        # Solo for now: the co-op layer is disabled until the base live mechanics are solid.
+        start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode, solo=True)
 
     # Two modes only: the live dungeon crawl and its simulated (recorded-match) twin.
     options = [

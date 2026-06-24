@@ -4,7 +4,8 @@
   .venv/Scripts/python src/main.py                      # MockFeed demo (no SIM)
   .venv/Scripts/python src/main.py --simdemo            # MockFeed demo + SIM hotkeys
   .venv/Scripts/python src/main.py --sim <slug>         # recorded match + SIM hotkeys
-  .venv/Scripts/python src/main.py --party              # co-op crawl on a recording + SIM hotkeys
+  .venv/Scripts/python src/main.py --party              # SOLO crawl on a recording + SIM hotkeys
+  .venv/Scripts/python src/main.py --sololive [--simlive]  # SOLO live crawl on the real feed
   .venv/Scripts/python src/main.py --dungeon            # dungeon crawl on test_sim recording
   .venv/Scripts/python src/main.py --live [fixture_id]  # LIVE match off the relay
   .venv/Scripts/python src/main.py --launcher           # web-style menu: live vs test game
@@ -44,14 +45,19 @@ async def main() -> None:
         else:
             # No id given -> show the match picker (config live.fixtures).
             flow.start_live_select(app, sim_mode=sim_live, is_lead=True)
+    elif "--sololive" in sys.argv:
+        # SOLO live crawl on the real match feed: party of one, always the leader (no relay
+        # coordination). --simlive accelerates pre-game waits; SIM hotkeys still apply.
+        flow.start_dungeon_party_live(app, "drpaj", is_lead=True,
+                                      sim_mode=sim_live, solo=True)
     elif "--party" in sys.argv:
-        # --party always plays a RECORDED match (live co-op is --app / --launcher), so it is
-        # the offline test path: turn SIM mode ON so the hotkeys (H help, R auto-buy+descend,
-        # F auto-pick+advance a window, S skip/continue) let the whole crawl be stepped
-        # through fast. The game-select, party-number and lobby auto-advance under SIM.
+        # --party plays a RECORDED match as a SOLO crawl (party of one over an in-process
+        # relay -- no network). SIM mode is ON so the hotkeys (H help, R auto-buy+descend,
+        # F auto-pick+advance a window, S skip/continue) step the whole crawl through fast.
+        # The game-select and lobby auto-advance under SIM.
         flow.start_sim_select(
             app,
-            lambda path: flow.start_dungeon_party(app, "drpaj", path, sim_mode=True),
+            lambda path: flow.start_dungeon_party(app, "drpaj", path, sim_mode=True, solo=True),
             sim_mode=True)
     elif "--dungeon" in sys.argv:
         flow.start_sim_select(
