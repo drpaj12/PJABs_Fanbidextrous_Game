@@ -64,6 +64,53 @@ def test_second_half_extra_time_starts_at_ninety() -> None:
     assert c.extra_time_window == 10
 
 
+# -- total_windows override: the dungeon's "last window absorbs extra time" --
+
+def test_total_windows_makes_the_last_window_extra_time() -> None:
+    # The dungeon wants exactly 3 windows per half, the 3rd absorbing stoppage/extra time --
+    # NOT 3 regular windows plus a separate 4th ET window. total_windows expresses that.
+    c = HalfClock(45, 15, total_windows=3)
+    assert c.regular_windows == 2
+    assert c.extra_time_window == 3
+
+
+def test_total_windows_keeps_window_minute_tiling() -> None:
+    c = HalfClock(45, 15, total_windows=3)
+    assert (c.window_start(1), c.window_end(1)) == (0, 15)
+    assert (c.window_start(2), c.window_end(2)) == (15, 30)
+    assert c.window_start(3) == 30          # W3 begins at 30' and runs to the whistle
+
+
+def test_total_windows_last_window_is_extra_time() -> None:
+    c = HalfClock(45, 15, total_windows=3)
+    assert c.is_extra_time(2) is False
+    assert c.is_extra_time(3) is True
+
+
+def test_total_windows_last_window_ready_only_when_match_over() -> None:
+    # W3 is the ET absorber: it must NOT resolve at a clock boundary (stoppage keeps playing),
+    # only when the half whistle blows -- so a live crawl never overshoots W3 into the recap.
+    c = HalfClock(45, 15, total_windows=3)
+    assert window_data_ready(99, 3, c, match_over=False) is False
+    assert window_data_ready(99, 3, c, match_over=True) is True
+    assert window_data_ready(31, 2, c, match_over=False) is True   # W2 still resolves at 30'
+
+
+def test_total_windows_second_half_offsets() -> None:
+    c = HalfClock(45, 15, start_minute=45, total_windows=3)
+    assert (c.window_start(1), c.window_end(1)) == (45, 60)
+    assert (c.window_start(2), c.window_end(2)) == (60, 75)
+    assert c.window_start(3) == 75
+    assert c.is_extra_time(3) is True
+
+
+def test_default_clock_unchanged_without_total_windows() -> None:
+    # The single-player live path (LiveFlow) keeps 3 regular windows + a 4th ET window.
+    c = HalfClock(45, 15)
+    assert c.regular_windows == 3
+    assert c.extra_time_window == 4
+
+
 # -- window_data_ready: the live-crawl resolution gate ----------------------
 
 def test_window_not_ready_until_feed_covers_its_end() -> None:

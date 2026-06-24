@@ -22,7 +22,7 @@ from src.game.session import GameSession
 from src.game.scoring import aggregate
 from src.game.cinematic import build_cinematic_script
 from src.game.half_clock import HalfClock, window_data_ready
-from src.game.live_catchup import windows_elapsed
+from src.game.live_catchup import windows_elapsed, initial_catch_up_target
 from src.game.match_clock import MatchClock
 from src.game.half_picker import pick_half
 from src.game.kickoff import seconds_to_kickoff
@@ -576,6 +576,10 @@ class DungeonPartyFlow:
         self.clock: Optional[HalfClock] = None
         self.kickoff_epoch: float = 0.0   # set by start_dungeon_party_live before play
         self._play_screen: Optional[PartyPlayScreen] = None
+        # False until the first live window of the CURRENT half has been entered. The first entry
+        # also defaults windows whose predict-deadline already passed (late join after kickoff);
+        # later entries only fast-forward fully data-ready windows. Reset each half (_reanchor).
+        self._half_live_started = False
         # This player's submitted picks per window, owned here so the per-window play screens
         # share one crawl-long history for the "Picks in" panel.
         self._pick_history: dict = {}
@@ -624,7 +628,7 @@ class DungeonPartyFlow:
         # feed_client is supplied by the caller (FeedClient is_lead=False); reuse it so the
         # follower never constructs a lead feed client.
         self.attach_live(self.feed_client, feed, int(p.fixture_id),
-                         HalfClock(_HALF_MIN, _WINDOW_MIN))
+                         HalfClock(_HALF_MIN, _WINDOW_MIN, total_windows=_WINDOWS_PER_HALF))
         return True
 
     async def leader_poll_feed(self) -> None:
@@ -764,9 +768,10 @@ class DungeonPartyFlow:
         if self.live:
             if self.coord.is_leader:
                 await self.leader_poll_feed()
-                await self.coord.leader_catch_up(self._windows_elapsed())
+                await self.coord.leader_catch_up(self._catch_up_target())
             else:
                 await self.coord.refresh()
+            self._half_live_started = True
             # Skip past everything already resolved -- land on the first unresolved window.
             if self.coord.resolved_through() >= self.window:
                 self.window = self.coord.resolved_through() + 1
@@ -791,6 +796,22 @@ class DungeonPartyFlow:
                                  pick_history=self._pick_history, sim=self.sim)
         self._play_screen = screen
         self.app.set_screen(screen)
+
+    def _catch_up_target(self) -> int:
+        """How many windows leader_catch_up should auto-resolve when entering a live window.
+
+        Normally the count the feed/bundles have already fully covered (_windows_elapsed). But on
+        the FIRST live window of a half, also default every window whose predict-deadline has
+        passed (a late join after kickoff): the player could never have locked those, so they
+        default and the player lands on the current editable window instead of a window the match
+        already started. Followers track the api-lead's frozen bundles, not their own wall clock,
+        so they keep the data-ready count (kept in lock-step via window_actuals)."""
+        base = self._windows_elapsed()
+        if (self._half_live_started or self.clock is None
+                or (self.peer and not self.is_api_lead)):
+            return base
+        editing = MatchClock(self.kickoff_epoch, self.clock).editing_window(time.time())
+        return initial_catch_up_target(editing, _WINDOWS_PER_HALF, base)
 
     def _windows_elapsed(self) -> int:
         """How many windows of the CURRENT half the live feed has already fully covered, so
@@ -836,7 +857,14 @@ class DungeonPartyFlow:
             if self.clock is None or self._play_screen is None:
                 return
             match_clock = MatchClock(self.kickoff_epoch, self.clock)
-            if match_clock.editing_window(time.time()) > self.window:
+            # A regular window locks when the editing clock advances past it. The LAST window is
+            # the Extra-Time absorber (is_extra_time): the clock never advances past it (it is
+            # the cap), so it instead locks the moment its data is ready -- the half whistle for
+            # the leader, the api-lead's frozen bundle for a follower (_live_data_ready).
+            boundary_passed = match_clock.editing_window(time.time()) > self.window
+            extra_time_done = (self.clock.is_extra_time(self.window)
+                               and self._live_data_ready(self.window))
+            if boundary_passed or extra_time_done:
                 self._play_screen.force_resolve()
         except Exception:
             pass
@@ -884,7 +912,11 @@ class DungeonPartyFlow:
         The per-poll MatchClock self-corrects the estimate against the API minute."""
         if not self.live or self.clock is None:
             return
-        self.clock = HalfClock(_HALF_MIN, _WINDOW_MIN, start_minute=_HALF_MIN)
+        # New half: re-arm late-join defaulting so H2's first window also bypasses any window
+        # whose deadline has already passed (e.g. the whole session is running behind).
+        self._half_live_started = False
+        self.clock = HalfClock(_HALF_MIN, _WINDOW_MIN, start_minute=_HALF_MIN,
+                               total_windows=_WINDOWS_PER_HALF)
         # Leader reads the live feed; a follower's feed is never polled, so it falls back to the
         # match minute the leader shared into the blob.
         minute = self.live_feed.current_minute() if (
@@ -999,8 +1031,10 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
         raw = {"games": []}
     games = load_schedule(raw)
     # Party windows are the dungeon's 15-minute windows (windows_per_half = 3), NOT the
-    # live half's 5-minute windows: the CrawlSession economy is built around 3 per half.
-    party_clock = HalfClock(_HALF_MIN, _WINDOW_MIN)
+    # live half's 5-minute windows: the CrawlSession economy is built around 3 per half. The
+    # 3rd window is the Extra-Time absorber (total_windows) -- there is no separate 4th ET
+    # window in the dungeon; W3 runs from 30' to the half whistle, stoppage included.
+    party_clock = HalfClock(_HALF_MIN, _WINDOW_MIN, total_windows=_WINDOWS_PER_HALF)
 
     def picker() -> None:
         app.set_screen(FixtureSelectScreen(app, games, on_resolve, sched_cfg, sim))

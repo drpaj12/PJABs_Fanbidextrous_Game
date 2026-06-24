@@ -19,3 +19,20 @@ def windows_elapsed(last_known_minute: int, clock: HalfClock, windows_per_half: 
     window to fast-forward."""
     return sum(1 for w in range(1, windows_per_half + 1)
                if window_data_ready(last_known_minute, w, clock, match_over))
+
+
+def initial_catch_up_target(editing_window: int, windows_per_half: int,
+                            base_elapsed: int) -> int:
+    """How many windows to auto-resolve (with default picks) on the FIRST live window of a half.
+
+    A player whose shop finishes after kickoff could never have locked the windows already in
+    play -- their predictions "had to be locked in before the game". So on first entry we default
+    every window whose predict-deadline has passed: that is `editing_window - 1` (the player edits
+    one window ahead of the one playing, so everything below the editing window is locked).
+
+    Capped at `windows_per_half - 1` so the LAST window (the Extra-Time absorber) is never
+    auto-resolved here -- it resolves only at the half whistle, so the late joiner still plays it.
+    Takes the max with `base_elapsed` (the data-ready count) so a finished/halftime feed, which
+    reports every window elapsed, still fast-forwards fully."""
+    deadline_passed = min(max(0, editing_window - 1), max(0, windows_per_half - 1))
+    return max(base_elapsed, deadline_passed)

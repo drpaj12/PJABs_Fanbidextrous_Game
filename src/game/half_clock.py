@@ -11,6 +11,7 @@ reports the half is over. Its end minute is therefore NOT computable here; the
 caller discovers it by polling and asking is_half_over().
 """
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -18,10 +19,18 @@ class HalfClock:
     half_minutes: int
     window_minutes: int
     start_minute: int = 0   # 0 for the first half, 45 for the second (absolute match minutes)
+    # When set, the half is fixed at exactly `total_windows` windows whose LAST one is the
+    # Extra-Time absorber: regular_windows = total_windows - 1, extra_time_window = total_windows.
+    # The dungeon crawl uses this (3 windows, W3 includes extra time) instead of the live single-
+    # player model (3 regular windows + a separate 4th ET window). None -> derive from minutes.
+    total_windows: Optional[int] = None
 
     @property
     def regular_windows(self) -> int:
-        """Number of fixed windows that tile the half (45 // 5 = 9)."""
+        """Number of fixed windows that tile the half (45 // 5 = 9), or total_windows - 1 when a
+        fixed window count is set (the last window then being the Extra-Time absorber)."""
+        if self.total_windows is not None:
+            return self.total_windows - 1
         return self.half_minutes // self.window_minutes
 
     @property

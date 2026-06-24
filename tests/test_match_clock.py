@@ -45,6 +45,20 @@ def test_extra_time_window_caps():
     assert m.playing_window(K + 60 * 60) == 10   # stays at ET past 45'
 
 
+def test_dungeon_clock_caps_editing_at_the_last_window():
+    # Dungeon clock: 45-min half, 15-min windows, 3 windows total (W3 = ET absorber). The
+    # editing/playing windows must NEVER reach a 4th window -- in stoppage they pin at W3, so
+    # the live crawl never force-resolves a phantom "W4 extra time" (the reported H2 bug).
+    c = HalfClock(45, 15, total_windows=3)
+    m = MatchClock(kickoff_epoch=K, clock=c)
+    assert m.playing_window(K + 30 * 60) == 3    # 30'+ -> W3 in play
+    assert m.editing_window(K + 30 * 60) == 3    # capped at W3, not 4
+    assert m.editing_window(K + 50 * 60) == 3    # deep stoppage still pins at W3
+    # A late join at 8' (W1 in play) leaves W2 as the editable window -- W1's deadline passed.
+    assert m.playing_window(K + 8 * 60) == 1
+    assert m.editing_window(K + 8 * 60) == 2
+
+
 def test_windows_entered_at_kickoff():
     m = mc()
     assert m.windows_entered(K - 1, K + 1) == [1]
