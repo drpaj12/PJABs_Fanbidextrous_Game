@@ -35,6 +35,32 @@ def test_round_trips_through_dict():
     assert again.match["home"] == "NED" and again.pool[0]["jersey"] == 9
 
 
+def test_seed_and_window_actuals_default_and_round_trip():
+    # Peer-computed co-op stores the creator's session seed and the lead's per-window input
+    # bundles in the blob. Both must default cleanly and survive a to_dict/from_dict round-trip.
+    p = Party.create(party_id=2, leader="drpaj")
+    assert p.seed is None and p.window_actuals == {}
+    p.seed = 4242
+    p.window_actuals = {"1": {"actuals": {"goal": 1}, "lines": [{"goal": 1}], "use": [["7"]]}}
+    again = Party.from_dict(p.to_dict())
+    assert again.seed == 4242
+    assert again.window_actuals == p.window_actuals
+    assert again.to_dict() == p.to_dict()
+
+
+def test_from_dict_tolerates_malformed_window_actuals_and_seed():
+    # Like window_picks, a stale shared room file can hold a malformed window_actuals payload;
+    # from_dict must drop non-dict garbage and tolerate a missing/blank seed without crashing.
+    base = Party.create(party_id=0, leader="drpaj").to_dict()
+    assert Party.from_dict({**base, "window_actuals": ["x"]}).window_actuals == {}
+    assert Party.from_dict({**base, "window_actuals": "nope"}).window_actuals == {}
+    mixed = {"1": {"actuals": {"goal": 1}}, "2": ["bad"]}
+    assert Party.from_dict({**base, "window_actuals": mixed}).window_actuals == {
+        "1": {"actuals": {"goal": 1}}}
+    assert Party.from_dict({**base, "seed": None}).seed is None
+    assert Party.from_dict({**base}).seed is None
+
+
 def test_from_dict_tolerates_malformed_window_picks():
     # Party 0 is a long-lived shared test room; a stale session file can hold a window_picks
     # of the wrong shape (e.g. a list from an older format). from_dict must not crash and must

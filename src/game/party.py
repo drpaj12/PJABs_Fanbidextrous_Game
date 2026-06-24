@@ -32,6 +32,16 @@ def _picks_dict(raw: object) -> dict:
     return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
 
 
+def _actuals_dict(raw: object) -> dict:
+    """Coerce the relay's window_actuals payload into {window_str: bundle_dict}, dropping
+    anything malformed. Mirrors _picks_dict: a stale shared-room file (party 0) may carry an
+    older-format value, and a non-dict payload (or a non-dict bundle) must never crash a
+    joining peer. Each kept bundle is the lead's frozen per-window input {actuals, lines, use}."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+
+
 @dataclass
 class Member:
     username: str
@@ -71,6 +81,8 @@ class Party:
     window_colors: list = field(default_factory=list)
     resolved_through_window: int = 0
     window_picks: dict = field(default_factory=dict)    # {slot_str: {"w": int, "preds": [...]}}
+    seed: Optional[int] = None                          # creator-set RNG seed (peer co-op)
+    window_actuals: dict = field(default_factory=dict)  # {window_str: {actuals, lines, use}}
 
     @classmethod
     def create(cls, party_id: int, leader: str) -> "Party":
@@ -114,6 +126,8 @@ class Party:
             "window_colors": list(self.window_colors),
             "resolved_through_window": self.resolved_through_window,
             "window_picks": dict(self.window_picks),
+            "seed": self.seed,
+            "window_actuals": {k: dict(v) for k, v in self.window_actuals.items()},
         }
 
     @classmethod
@@ -129,6 +143,8 @@ class Party:
             window_colors=list(d.get("window_colors", [])),
             resolved_through_window=int(d.get("resolved_through_window", 0)),
             window_picks=_picks_dict(d.get("window_picks", {})),
+            seed=(int(d["seed"]) if d.get("seed") not in (None, "") else None),
+            window_actuals=_actuals_dict(d.get("window_actuals", {})),
         )
 
 

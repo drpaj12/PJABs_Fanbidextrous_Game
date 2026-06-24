@@ -39,7 +39,9 @@ class PartyLobbyScreen(Screen):
                         LAYOUT.i("plobby_btn_h", 60)), start_label)
 
     def handle(self, event: pygame.event.Event) -> None:
-        if self.coord.is_leader and event.type == pygame.MOUSEBUTTONDOWN \
+        # polls_api, not is_leader: in PEER mode every client is_leader (each resolves locally),
+        # but only the api-lead (creator) starts the crawl; followers wait for phase -> shop.
+        if self.coord.polls_api and event.type == pygame.MOUSEBUTTONDOWN \
                 and self.start_btn.hit(event.pos):
             self.on_start()
 
@@ -49,7 +51,7 @@ class PartyLobbyScreen(Screen):
         self._elapsed += dt
         if not self._polling and self._elapsed >= _POLL:
             self._kick_poll()
-        if self.sim and self.sim.enabled and self.coord.is_leader and self.coord.phase() == "lobby":
+        if self.sim and self.sim.enabled and self.coord.polls_api and self.coord.phase() == "lobby":
             self.on_start()
         if self.coord.phase() == "shop":
             self._advanced = True
@@ -84,7 +86,7 @@ class PartyLobbyScreen(Screen):
             pygame.draw.rect(surface, _C["border"], r, width=2, border_radius=8)
             tag = "  (leader)" if i == 0 else ""
             surface.blit(rf.render(f"{i}. {name}{tag}", True, _C["white"]), (r.x + 14, r.y + 16))
-        if self.coord.is_leader:
+        if self.coord.polls_api:
             self.start_btn.draw(surface, font(LAYOUT.i("plobby_row_size", 20)))
         else:
             hf = font(LAYOUT.i("plobby_hint_size", 16))

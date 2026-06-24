@@ -62,6 +62,7 @@ from src.ui.screens.party_play_screen import PartyPlayScreen
 from src.sync.relay_client import RelayClient
 from src.sync.local_relay import LocalRelay
 from src.sync.party_coordinator import PartyCoordinator
+from src.sync.peer_coordinator import PeerCoordinator
 
 if TYPE_CHECKING:
     from src.ui.app import App
@@ -562,6 +563,12 @@ class DungeonPartyFlow:
         # (set by start_dungeon_party_live for non-lead clients). Distinct from self.live, which
         # only flips True once attach_live / attach_live_from_blob has run.
         self.is_follower_live = False
+        # PEER mode (peer-computed co-op): every client resolves its OWN local CrawlSession from
+        # the api-lead's shared per-window input bundles + the creator-set seed (PeerCoordinator).
+        # is_api_lead marks the one client that polls the sports API and writes those bundles;
+        # followers read them from the blob. Both default off (SIM / solo / leader-authoritative).
+        self.peer = False
+        self.is_api_lead = False
         # LIVE wiring (set by attach_live / attach_live_from_blob); None/False in SIM mode.
         self.feed_client: Optional[FeedClient] = None
         self.live_feed: Optional[LiveFeed] = None
@@ -625,7 +632,9 @@ class DungeonPartyFlow:
         (+ the lineup pool once it arrives) into the blob. Fully guarded -- a network
         failure here must never crash play; followers render from the blob and never poll
         the sports API."""
-        if not self.live or not self.coord.is_leader:
+        # Gate on polls_api, not is_leader: in PEER mode every client is_leader (so each
+        # resolves locally) but only the api-lead actually fetches the feed and shares it.
+        if not self.live or not self.coord.polls_api:
             return
         try:
             snap = await self.feed_client.get_feed(self.fixture_id)
@@ -786,6 +795,12 @@ class DungeonPartyFlow:
     def _windows_elapsed(self) -> int:
         """How many windows of the CURRENT half the live feed has already fully covered, so
         catch-up can auto-resolve them. 0 in SIM or before the feed is attached."""
+        # PEER follower: it does not poll the feed, so "how many windows are ready" is the count
+        # of per-window bundles the api-lead has already shared into the blob (cleared each half).
+        if self.peer and not self.is_api_lead:
+            wa = self.coord.party.window_actuals if self.coord.party else {}
+            return sum(1 for k in wa
+                       if str(k).isdigit() and 1 <= int(k) <= _WINDOWS_PER_HALF)
         if not self.live or self.clock is None or self.live_feed is None:
             return 0
         match_over = self.live_feed.match_status() in (_HALFTIME_STATUS, _FINISHED_STATUS)
@@ -798,6 +813,11 @@ class DungeonPartyFlow:
         clock boundary locks the picks (force_resolve); THIS defers the scoring until the
         query has the data -- the 'queries happen in the window' behaviour. Mirrors the
         single-player live path's windows_ready() gate."""
+        # PEER follower: ready exactly when the api-lead's frozen bundle for this window has
+        # landed in the blob -- never gated on a leader push it cannot see.
+        if self.peer and not self.is_api_lead:
+            wa = self.coord.party.window_actuals if self.coord.party else {}
+            return str(window) in wa
         if self.clock is None or self.live_feed is None:
             return True
         match_over = self.live_feed.match_status() in (_HALFTIME_STATUS, _FINISHED_STATUS)
@@ -915,7 +935,8 @@ def start_dungeon_party(app: "App", username: str, sim_rel_path: str,
 
 
 def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
-                             sim_mode: bool = False, solo: bool = False) -> None:
+                             sim_mode: bool = False, solo: bool = False,
+                             peer: bool = False) -> None:
     """LIVE dungeon crawl on the real match feed (lineups, score, clock drive the windows).
 
     solo=True (the deployed default) runs it as a party of one over an in-process LocalRelay:
@@ -934,6 +955,9 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
     the live feed/clock are attached, and the flow runs (lobby -> shop -> 3 windows per half)."""
     if solo:
         is_lead = True                  # the solo player always polls the feed
+    # In peer mode every client resolves its OWN local session from shared inputs
+    # (PeerCoordinator); the leader-authoritative PartyCoordinator is used otherwise.
+    coord_cls = PeerCoordinator if peer else PartyCoordinator
     sim = SimMode(sim_mode)
     app.global_handler = sim.handle_global
     app.overlay = sim.draw_overlay
@@ -951,12 +975,14 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
     # invoked at _to_shop). The lobby auto-advances to shop when the leader flips the phase.
     if not is_lead:
         def picked_follower(party_number: int) -> None:
-            coord = PartyCoordinator(
+            coord = coord_cls(
                 relay=relay, party_id=party_number, username=username,
                 pool=[], actuals_fn=lambda w: flow.live_actuals_for(w))
             flow = DungeonPartyFlow(app, LiveFeed(), [], coord, sim)
             flow.feed_client = feed_client   # is_lead=False; never calls get_feed
             flow.is_follower_live = True
+            flow.peer = peer
+            flow.is_api_lead = is_lead
 
             async def go() -> None:
                 await coord.join()
@@ -994,11 +1020,13 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
                 kickoff_epoch = now_now + secs if secs is not None else now_now
 
                 def picked(party_number: int) -> None:
-                    coord = PartyCoordinator(
+                    coord = coord_cls(
                         relay=relay, party_id=party_number, username=username,
                         pool=pool, actuals_fn=lambda w: flow.live_actuals_for(w))
                     flow = DungeonPartyFlow(app, feed, pool, coord, sim)
                     flow.kickoff_epoch = kickoff_epoch
+                    flow.peer = peer
+                    flow.is_api_lead = is_lead
                     flow.attach_live(feed_client, feed, real_id, party_clock)
 
                     async def go() -> None:
@@ -1201,9 +1229,12 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
         start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode, solo=True)
 
     def go_party_coop() -> None:
-        # Co-op live crawl (up to 3 players over the shared PHP relay). The lead client polls the
-        # match feed; followers render from the shared blob. Networked party transport (solo=False).
-        start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode, solo=False)
+        # Co-op live crawl (up to 3 players over the shared PHP relay). PEER-COMPUTED: the api-lead
+        # polls the match feed and shares the creator-set seed + frozen per-window input bundles;
+        # every client (lead and followers) resolves its OWN local CrawlSession from those inputs,
+        # so no client ever hangs waiting on another. Networked party transport (solo=False).
+        start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode,
+                                 solo=False, peer=True)
 
     # Three modes: solo live crawl, co-op live crawl (party), and the recorded-match test twin.
     options = [

@@ -164,6 +164,10 @@ function create_empty_party(int $party, string $leader): array {
         'window_colors'             => [],
         'resolved_through_window'   => 0,
         'window_picks'              => new stdClass(),
+        // Peer-computed co-op: creator-set RNG seed (null until set) and the api-lead's frozen
+        // per-window input bundles ({window: {actuals, lines, use}}) that every client replays.
+        'seed'                      => null,
+        'window_actuals'            => new stdClass(),
     ];
 }
 
@@ -259,7 +263,8 @@ function action_party_push(int $party): void {
     }
 
     foreach (['phase', 'half', 'fixture_id', 'kickoff_iso', 'match', 'pool', 'members',
-              'dungeon', 'log', 'window_colors', 'resolved_through_window'] as $key) {
+              'dungeon', 'log', 'window_colors', 'resolved_through_window',
+              'seed', 'window_actuals'] as $key) {
         if (array_key_exists($key, $input)) { $p[$key] = $input[$key]; }
     }
     if (!empty($input['clear_picks'])) { $p['window_picks'] = new stdClass(); }

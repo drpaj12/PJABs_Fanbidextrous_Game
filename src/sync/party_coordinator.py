@@ -56,6 +56,13 @@ class PartyCoordinator:
         if blob:
             self.party = Party.from_dict(blob)
 
+    @property
+    def polls_api(self) -> bool:
+        """Whether THIS client fetches the match feed and shares it. In the leader-authoritative
+        model that is the leader; PeerCoordinator overrides it to the separate api-lead flag.
+        The live flow gates its sports-API polling on this so both coordinators share one path."""
+        return self.is_leader
+
     def phase(self) -> str:
         return self.party.phase if self.party else "lobby"
 
