@@ -153,9 +153,10 @@
     }
   },
   "launcher": {
-    "_comment": "Web entry menu: only the live dungeon crawl and its simulated (recorded-match) twin. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
+    "_comment": "Web entry menu: solo live crawl, co-op live crawl (party), and the simulated (recorded-match) twin. test_sim is a bundled recorded match (no API, no waiting) for trying the full flow.",
     "party_label": "Test crawl (recorded match)",
-    "party_live_label": "Live dungeon crawl",
+    "party_live_label": "Solo live crawl",
+    "party_coop_label": "Co-op live crawl (party)",
     "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json",
     "simulations_dir": "assets/data/simulations"
   },

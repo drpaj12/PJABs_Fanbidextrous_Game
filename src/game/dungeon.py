@@ -80,12 +80,23 @@ def monster_count(half: int, party_size: int, threat: int) -> int:
 
 def monster_flavor(half: int, party_size: int, threat: int) -> dict:
     """Per-window predict-phase flavor: how many monsters the party faces and how many fall
-    to this fighter. `total` is the engaged horde (monster_count); `yours` is the party split."""
+    to this fighter. `total` is the engaged horde (monster_count); `yours` is the party split.
+    `base` is the horde the party size alone summons (per_fighter * party_size); the rest are
+    `carried` stragglers left unslain last window (so an 8-goblin solo window reads as
+    '6 + 2 stragglers', not a broken party-size scale)."""
     total = monster_count(half, party_size, threat)
     name = monster_name(half)
     yours = max(1, round(total / max(1, party_size)))
-    text = f"Your party is engaging {total} {name}, you will fight {yours} of them."
-    return {"total": total, "yours": yours, "name": name, "text": text}
+    carried = int(_D["monster_difficulty_per_threat"]) * threat
+    base = total - carried
+    if carried > 0:
+        text = (f"Your party is engaging {total} {name} "
+                f"({base} for a party of {party_size} + {carried} stragglers from last window); "
+                f"you will fight {yours} of them.")
+    else:
+        text = f"Your party is engaging {total} {name}, you will fight {yours} of them."
+    return {"total": total, "yours": yours, "name": name, "base": base,
+            "carried": carried, "text": text}
 
 
 @dataclass(frozen=True)

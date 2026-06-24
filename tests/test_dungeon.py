@@ -49,6 +49,16 @@ def test_monster_flavor_half2_name_and_solo_floor():
     assert monster_flavor(half=1, party_size=99, threat=0)["yours"] >= 1
 
 
+def test_monster_flavor_splits_out_carried_threat():
+    # Solo window with 2 stragglers carried: 6 base + 2 threat = 8, and the flavor text must
+    # make the carryover explicit so an 8-goblin solo window does not read as broken scaling.
+    f = monster_flavor(half=1, party_size=1, threat=2)
+    assert f["total"] == 8 and f["base"] == 6 and f["carried"] == 2
+    assert "6 for a party of 1" in f["text"] and "2 stragglers" in f["text"]
+    # No "stragglers" wording when nothing carried over (threat 0 keeps the original text).
+    assert "stragglers" not in monster_flavor(half=1, party_size=1, threat=0)["text"]
+
+
 def test_gate_pass_with_weapon_and_power():
     rng = SeqRng([3])                               # base roll 3
     out = resolve_gate(rng, weapon_bonus=4, armor_soak=0, power=1, half=1,

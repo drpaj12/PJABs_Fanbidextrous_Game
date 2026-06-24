@@ -1187,21 +1187,28 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
                    username: str = "") -> None:
     """Web entry: choose 'Live match' (real fixtures + relay) or 'Test game' (an offline
     recorded match, no API/no waiting) so the full flow can be tried without a live game."""
-    # The simulated party crawl plays its recorded match deterministically (downstream
-    # sim_mode=True), but the PICKER inherits the launcher's sim_mode so a real web user
-    # (sim_mode=False) taps a game rather than having the first one auto-picked.
+    # The simulated party crawl is INHERENTLY the offline test path, so the crawl itself always
+    # runs under SIM (hotkeys H/R/A/S/F live) regardless of the launcher's sim_mode -- otherwise
+    # a normal web user (sim_mode=False) would get a dead-hotkey recorded crawl. Only the PICKER
+    # inherits the launcher's sim_mode, so a real user still taps a game instead of auto-picking.
     def go_party() -> None:
         start_sim_select(app, lambda path: start_dungeon_party(app, username, path,
-                                                               sim_mode=sim_mode, solo=True),
+                                                               sim_mode=True, solo=True),
                          sim_mode=sim_mode)
 
     def go_party_live() -> None:
-        # Solo for now: the co-op layer is disabled until the base live mechanics are solid.
+        # Solo live crawl: party of one, always the leader -- no relay coordination, no hang.
         start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode, solo=True)
 
-    # Two modes only: the live dungeon crawl and its simulated (recorded-match) twin.
+    def go_party_coop() -> None:
+        # Co-op live crawl (up to 3 players over the shared PHP relay). The lead client polls the
+        # match feed; followers render from the shared blob. Networked party transport (solo=False).
+        start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode, solo=False)
+
+    # Three modes: solo live crawl, co-op live crawl (party), and the recorded-match test twin.
     options = [
         (_LAUNCHER["party_live_label"], go_party_live),
+        (_LAUNCHER["party_coop_label"], go_party_coop),
         (_LAUNCHER["party_label"], go_party),
     ]
     app.set_screen(LauncherScreen(app, options))
