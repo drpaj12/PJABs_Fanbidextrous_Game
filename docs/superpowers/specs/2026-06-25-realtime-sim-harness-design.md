@@ -114,31 +114,51 @@ and returns the current `SimLiveFeed` snapshot. No network, no relay.
 the crawl results post and which it drains from the coordinator log each frame. The
 diagnostic trail rides the same panel.
 
+Each line carries an ACTOR tag so a co-op run shows BOTH sides in one timeline -- what
+this client did AND what the other client did, each stamped with the time it happened
+(observed). The lead client's tag is its username (`drpaj`); the other player's lines are
+tagged with the peer's username (or `peer` if unknown).
+
 ```python
 class DiagLog:
-    def __init__(self, enabled: bool) -> None: ...
+    def __init__(self, enabled: bool, actor: str) -> None: ...   # actor = this client's tag
     def add(self, minute: int, kind: str, detail: str) -> None:
-        # formats and appends:  "[drpaj] t=+MM:SS min=NN' KIND detail"
+        # local action: "[<actor>] t=+MM:SS min=NN' KIND detail"
+    def add_peer(self, peer: str, minute: int, kind: str, detail: str) -> None:
+        # observed peer action: "[<peer>] t=+MM:SS min=NN' KIND detail"
     def drain(self) -> list[str]:
         # returns + clears lines not yet shown (screen appends them to its LogList)
 ```
 
 The flow holds one `DiagLog`, writes at each meaningful point, and the play screen drains
 new lines into its `LogList` every frame (same mechanism it uses for the crawl log).
-Lines are ASCII-only (project rule). Example trace for an arrive-at-+20 realtime run:
+Lines are ASCII-only (project rule). Example trace from the LEAD device's panel in a co-op
+arrive-at-+20 realtime run (its own `[drpaj]` lines interleaved with observed `[ally]`):
 
 ```
 [drpaj] t=+20:00 min=20' KICKOFF set offset=+20 (arrive mid-W1)
 [drpaj] t=+20:00 min=20' QUERY get_feed(fixture=FRA-CRO) -> lkm=20' status=1H
 [drpaj] t=+20:00 min=20' CATCH-UP target=1 (W1 deadline passed -> default, land W2)
+[drpaj] t=+20:05 min=20' SHARE bundle W1 -> relay (default picks)
+[ally]  t=+20:18 min=20' JOINED session, syncing seed+pool from blob
 [drpaj] t=+25:00 min=25' W2 force_resolve (editing 2->3) data_ready=yes
+[drpaj] t=+25:01 min=25' SHARE bundle W2 -> relay
+[ally]  t=+25:14 min=25' bundle W2 OBSERVED in blob (ally can now resolve W2)
 [drpaj] t=+45:00 min=45' W3 (extra-time absorber) resolve at whistle
 ```
 
-Diagnostic write points in the flow: kickoff/offset set; each `get_feed` query (minute +
+The FOLLOWER device's panel is the mirror: its own actions tagged `[ally]`, and the
+lead's bundle writes observed from the blob tagged `[drpaj]`. Because the two devices are
+separate processes, "what the other one is doing" is surfaced from the shared relay blob
+(bundles present, picks seen, join/seed sync) -- each client logs the peer events it can
+observe, stamped with its own local sim time, so the panel reads as one combined timeline.
+
+Diagnostic write points (local): kickoff/offset set; each `get_feed` query (minute +
 resulting last_known_minute + status); catch-up target chosen (with the reason); each
 force_resolve (which window, editing transition, data_ready); each window resolve
-(data-ready vs default); half re-anchor; reaching recap/final.
+(data-ready vs default); bundle SHARE to relay; half re-anchor; reaching recap/final.
+Peer write points (observed from blob each poll): peer join / seed+pool sync; peer bundle
+for window W first OBSERVED; peer pick seen.
 
 ## Selection flow
 
@@ -160,12 +180,27 @@ START calls the EXISTING `start_dungeon_party_live(...)` with the clock source +
 Drives the party-of-one live dungeon path -- the one carrying the late-join/catch-up
 logic. Reproduces and regression-checks all three 2026-06-24 playtest bugs.
 
-### Phase 2 -- Co-op (two in-process sim clients)
-Two `DungeonPartyFlow` clients (`peer=True`) over a shared in-process `LocalRelay`, each
-on a `SimClock` with the SAME offset (one is_api_lead, one follower). Exercises the
-peer-bundle replay / follower data-ready path under the harness. Built directly on
-Phase 1's seams. Both clients log to their own `[drpaj]` panel so the relay handshake is
-visible from each side.
+### Phase 2 -- Co-op (two REAL devices over the real relay)
+Co-op runs as TWO SEPARATE app instances -- e.g. a phone and a desktop -- NOT one
+process. Each device independently runs the sim harness (`peer=True`) wired to the REAL
+PHP relay (`RelayClient`), exactly like production peer-computed co-op, but with the sim
+feed + sim clock in place of the live feed:
+
+- Both players choose "SIM (realtime test)" -> Co-op, and enter the SAME session code
+  (shared out-of-band, like real co-op). The api-lead (`drpaj`) also picks the match +
+  offset; the follower just joins.
+- The api-lead's `SimLiveFeed` + `SimClock` drive bundle production at sim-realtime pace;
+  bundles + the creator-set seed flow through the real relay. The follower reads them and
+  replays them locally -- its data-ready gate / catch-up track the lead's bundles
+  arriving over (real) time, faithfully reproducing the live follower experience.
+- This uses the EXISTING relay schema (seed + per-window `window_actuals` bundles) -- no
+  PHP change. The only difference from live co-op is the feed source.
+- Each device shows its own combined `[<self>]`/`[<peer>]` log panel (see Logging), so
+  the relay handshake is visible from both phone and desktop.
+
+Determinism across devices comes from the shared seed + identical bundles (the follower
+never re-derives anything from the feed). The match + offset only need to match on the
+lead, since the follower is bundle-driven.
 
 ## What stays untouched
 
@@ -186,10 +221,18 @@ visible from each side.
 - A headless harness driver (extend `TOOLS/smoke_flow.py` or a new `TOOLS/smoke_sim_*`)
   that runs an offset=+20 solo realtime/stepped pass and asserts it lands on W2 (W1
   defaulted), W3 absorbs extra time, and it reaches the recap/final -- the three bugs.
+- Co-op: shipped path is the REAL relay (two devices), which is verified by a manual
+  phone+desktop run (documented procedure). For an AUTOMATED regression of the
+  peer-bundle exchange, a test harness may wire two flows to an in-process `LocalRelay`
+  (test-only) and assert the follower's bundle-driven catch-up + the combined
+  `[self]`/`[peer]` log timeline -- the in-process relay is a test substitute, not the
+  shipped co-op transport.
 - Existing 363 tests must stay green (no live-path behavior change).
 
 ## Non-goals
 
-- No web/pygbag exposure of the harness (desktop dev tool; can be revisited).
 - No new sports data; reuses bundled StatsBomb recordings.
-- No change to the PHP relay schema (co-op uses the in-process `LocalRelay`).
+- No change to the PHP relay schema (co-op reuses the existing seed + `window_actuals`
+  bundle schema over the real `RelayClient`).
+- Solo realtime/stepped is primarily a desktop dev tool; co-op spans phone + desktop (the
+  follower device path must therefore work under pygbag/WASM like production co-op).
