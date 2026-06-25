@@ -160,6 +160,11 @@
   "simsel_card_sub_size": 16,
   "simsel_card_title_max": 30,
 
+  "simoff_stepper_y": 300,
+  "simoff_step_btn": 72,
+  "simoff_start_y": 440,
+  "simoff_value_size": 40,
+
   "shop_list_top": 116,
   "shop_row_h": 64,
   "shop_row_gap": 8,

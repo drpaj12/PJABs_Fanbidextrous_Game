@@ -34,7 +34,9 @@ class PartyPlayScreen(Screen):
                  on_poll: Optional[Callable[[], Awaitable[None]]] = None,
                  can_resolve: Optional[Callable[[int], bool]] = None,
                  pick_history: Optional[dict] = None,
-                 sim: Optional[SimMode] = None) -> None:
+                 sim: Optional[SimMode] = None,
+                 diag: Optional[object] = None,
+                 on_step: Optional[Callable[[], None]] = None) -> None:
         super().__init__(app)
         self.coord = coord
         self.window = window
@@ -42,6 +44,12 @@ class PartyPlayScreen(Screen):
         self.on_continue = on_continue
         self.require_all = require_all
         self.on_poll = on_poll
+        # SIM HARNESS (both None in production): diag is a DiagLog whose new lines are drained into
+        # the scrollable log every frame so the developer watches the [self]/[peer] trail live;
+        # on_step, when set, makes the SIM F hotkey advance the virtual clock (accelerated/stepped
+        # mode) instead of auto-submitting.
+        self.diag = diag
+        self.on_step = on_step
         # Per-stat lock state for the predict dials (mirrors live_play_screen): green = locked
         # (the bet), orange = adjusted but not locked, red = untouched.
         self.locked: set = set()
@@ -123,6 +131,20 @@ class PartyPlayScreen(Screen):
         return pygame.Rect(box.x + pad, box.bottom - pad - bh, box.width - 2 * pad, bh)
 
     def handle(self, event: pygame.event.Event) -> None:
+        # SIM stepped mode: F advances the virtual clock in ANY phase (edit while filling, wait
+        # while the window elapses), overriding F's offline auto-submit meaning. Only active when
+        # the flow wired an on_step (clock_source.rate == 0); None otherwise.
+        if self.on_step is not None and self.sim and self.sim.is_key(event, pygame.K_f):
+            self.on_step()
+            return
+        # Log scrolling works in every phase that draws the log (wait + resolved), so the diag
+        # trail can be scrolled while the window is still being resolved.
+        if self.phase in ("wait", "resolved"):
+            self.log.handle(event)
+            if event.type == pygame.MOUSEBUTTONDOWN and self.log_scroll.contains(event.pos):
+                self.log.scroll_to(self.log_scroll.handle(
+                    event, self.log.scroll, self.log.max_scroll()))
+                return
         if self.phase == "edit":
             if self.sim and self.sim.is_key(event, pygame.K_f):
                 self._submit()
@@ -148,11 +170,6 @@ class PartyPlayScreen(Screen):
                     self._tap_stat(s["code"], event.pos[0], r)
                     return
         elif self.phase == "resolved":
-            self.log.handle(event)
-            if event.type == pygame.MOUSEBUTTONDOWN and self.log_scroll.contains(event.pos):
-                self.log.scroll_to(self.log_scroll.handle(
-                    event, self.log.scroll, self.log.max_scroll()))
-                return
             if event.type == pygame.MOUSEBUTTONDOWN and self.action_btn.hit(event.pos):
                 self.on_continue()
             elif self.sim and self.sim.is_key(event, pygame.K_s):
@@ -198,7 +215,17 @@ class PartyPlayScreen(Screen):
             self._submit()
         self.require_all = False
 
+    def poke(self) -> None:
+        """SIM stepped mode: after the virtual clock jumps, force the next update() to run a poll
+        immediately instead of waiting out the real-time poll interval."""
+        self._elapsed = _POLL
+
     def update(self, dt: float) -> None:
+        # Drain any new diagnostic lines into the scrollable log every frame, in EVERY phase, so
+        # the SIM trail is visible live (edit/wait/resolved). No-op without a DiagLog.
+        if self.diag is not None:
+            for line in self.diag.drain():
+                self.log.add(line)
         if self.phase == "edit":
             return
         self._elapsed += dt
@@ -266,6 +293,12 @@ class PartyPlayScreen(Screen):
                 self._draw_potion_zoom(surface)
         elif self.phase == "wait":
             self._draw_picks_panel(surface)
+            # SIM harness: show the live diag trail under the picks panel during the wait, so the
+            # developer sees QUERY / CATCH-UP / FORCE-RESOLVE / [peer] events as they happen.
+            if self.diag is not None:
+                self.log.draw(surface)
+                if self.log.max_scroll() > 0:
+                    self.log_scroll.draw(surface, self.log.scroll, self.log.max_scroll())
         else:
             self._draw_resolved(surface, v)
             self.action_btn.draw(surface, font(LAYOUT.i("dp_stat_size", 19)))

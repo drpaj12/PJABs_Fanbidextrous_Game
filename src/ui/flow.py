@@ -51,6 +51,11 @@ from src.ui.screens.live_resolve_screen import LiveResolveScreen
 from src.ui.screens.live_play_screen import LivePlayScreen
 from src.ui.screens.fixture_select_screen import FixtureSelectScreen
 from src.ui.screens.sim_game_select_screen import SimGameSelectScreen
+from src.ui.screens.sim_offset_screen import SimOffsetScreen
+from src.game.sim_clock import SimClock, kickoff_epoch_for
+from src.game.sim_live_feed import SimLiveFeed
+from src.game.diag_log import DiagLog
+from src.sync.sim_feed_client import SimFeedClient
 from src.game.simulations import list_simulations
 from src.game.schedule import load_schedule
 from src.ui.screens.launcher_screen import LauncherScreen
@@ -93,6 +98,10 @@ _RESYNC_THRESHOLD = CONFIG["live"]["resync_threshold_seconds"]
 _WINDOWS_PER_HALF = CONFIG["game"]["windows_per_half"]
 _DUNGEON_PARTY_SIZE = CONFIG["game"]["dungeon_party_size"]
 _SIMS_DIR = _LAUNCHER["simulations_dir"]
+_SIM_HARNESS = CONFIG["sim_harness"]
+_SIM_SELF_ACTOR = _SIM_HARNESS["self_actor"]
+# The recorded feed has no real API-Football id; SimFeedClient ignores it (it makes no call).
+_SIM_FIXTURE_ID = 0
 # Fixed party id for the SOLO crawl: with an in-process LocalRelay the id is cosmetic (the
 # blob lives in this process), so there is nothing to share and no party-number screen.
 _SOLO_PARTY_ID = 0
@@ -576,6 +585,15 @@ class DungeonPartyFlow:
         self.clock: Optional[HalfClock] = None
         self.kickoff_epoch: float = 0.0   # set by start_dungeon_party_live before play
         self._play_screen: Optional[PartyPlayScreen] = None
+        # REALTIME SIM HARNESS (None in production): when attached, clock_source replaces the
+        # wall clock (self._now) so the EXACT live path runs on a virtual clock, and diag
+        # records a [drpaj]/[peer] trail into the play screen's scrollable log. fixture_label
+        # is the recorded match's name for the QUERY log lines; _peer_seen tracks which peer
+        # bundles have already been logged (co-op). See src/game/sim_clock.py + diag_log.py.
+        self.clock_source = None          # Optional[SimClock]
+        self.diag = None                  # Optional[DiagLog]
+        self.fixture_label: str = ""
+        self._peer_seen: set = set()
         # False until the first live window of the CURRENT half has been entered. The first entry
         # also defaults windows whose predict-deadline already passed (late join after kickoff);
         # later entries only fast-forward fully data-ready windows. Reset each half (_reanchor).
@@ -583,6 +601,66 @@ class DungeonPartyFlow:
         # This player's submitted picks per window, owned here so the per-window play screens
         # share one crawl-long history for the "Picks in" panel.
         self._pick_history: dict = {}
+
+    # -- REALTIME SIM HARNESS seam (no-op in production) --------------------
+
+    def _now(self) -> float:
+        """The clock the live arithmetic reads. In production this IS the wall clock; under the
+        SIM harness it is the virtual SimClock, so the EXACT same catch-up / boundary / re-anchor
+        code runs on a clock we control (realtime 1x or stepped on the SIM F hotkey)."""
+        return self.clock_source.now(time.time()) if self.clock_source else time.time()
+
+    def _match_minute(self) -> int:
+        """Absolute match minute the virtual clock currently shows (for diag stamps). 0 before
+        the clock is attached."""
+        if self.clock is None:
+            return 0
+        return MatchClock(self.kickoff_epoch, self.clock).display_minute(self._now())
+
+    def _dlog(self, kind: str, detail: str = "") -> None:
+        """Write a [self] diagnostic line stamped with seconds-from-kickoff and the match minute.
+        No-op unless the SIM harness attached a DiagLog."""
+        if self.diag is None:
+            return
+        secs = int(self._now() - self.kickoff_epoch)
+        self.diag.add(self._match_minute(), kind, detail, seconds_from_kickoff=secs)
+
+    def _sim_step(self) -> None:
+        """SIM stepped mode (accelerated): advance the virtual clock to just past the NEXT window
+        boundary, then poke the play screen so its poll re-evaluates immediately. With rate=0 the
+        clock is otherwise frozen, so this is the only thing that moves time -- the developer taps
+        the existing SIM F hotkey to walk the flow window by window."""
+        if self.clock_source is None or self.clock is None:
+            return
+        raw = (self._now() - self.kickoff_epoch) / 60.0          # half-relative elapsed minutes
+        nxt = ((raw // _WINDOW_MIN) + 1) * _WINDOW_MIN           # next 15' boundary (>= current)
+        target = self.kickoff_epoch + nxt * 60.0
+        delta = target - self._now()
+        if delta > 0:
+            self.clock_source.step(delta)
+        self._dlog("STEP", f"-> min={self._match_minute()}'")
+        if self._play_screen is not None:
+            self._play_screen.poke()
+
+    def _observe_peer(self) -> None:
+        """Co-op diag: log each per-window input bundle the api-lead has newly shared into the
+        party blob as an observed [peer] line, so the combined log shows what the OTHER client is
+        doing and when. No-op solo / before the blob carries window_actuals / without a DiagLog."""
+        # Only a FOLLOWER observes the api-lead's bundles -- the api-lead creates them and already
+        # logs its own QUERY / CATCH-UP / FORCE-RESOLVE actions as [self].
+        if self.diag is None or not (self.peer and not self.is_api_lead):
+            return
+        if self.coord.party is None:
+            return
+        wa = self.coord.party.window_actuals or {}
+        for k in wa:
+            key = str(k)
+            if not key.isdigit() or key in self._peer_seen:
+                continue
+            self._peer_seen.add(key)
+            self.diag.add_peer(_LEAD_NAME, self._match_minute(), "OBSERVED",
+                               f"api-lead bundle W{key} in blob",
+                               seconds_from_kickoff=int(self._now() - self.kickoff_epoch))
 
     # -- LIVE mode wiring (Task 14) -----------------------------------------
 
@@ -789,11 +867,17 @@ class DungeonPartyFlow:
         match clock crosses this window's boundary (editing_window advances past it),
         force_resolve auto-submits and the leader resolves with require_all=False once the feed
         covers the window (can_resolve). Mirrors LiveFlow's poll-driven, clock-advanced loop."""
+        # SIM harness: feed the DiagLog so the screen drains it into its scrollable log, and -- in
+        # stepped (accelerated) mode -- route the SIM F hotkey to advance the virtual clock instead
+        # of auto-submitting. on_step is None outside the harness, so F keeps its offline meaning.
+        stepped = self.clock_source is not None and self.clock_source.rate == 0.0
         screen = PartyPlayScreen(self.app, self.coord, self.window, self._label(),
                                  self._on_continue, require_all=False,
                                  on_poll=self._live_poll,
                                  can_resolve=self._live_data_ready,
-                                 pick_history=self._pick_history, sim=self.sim)
+                                 pick_history=self._pick_history, sim=self.sim,
+                                 diag=self.diag,
+                                 on_step=(self._sim_step if stepped else None))
         self._play_screen = screen
         self.app.set_screen(screen)
 
@@ -810,8 +894,11 @@ class DungeonPartyFlow:
         if (self._half_live_started or self.clock is None
                 or (self.peer and not self.is_api_lead)):
             return base
-        editing = MatchClock(self.kickoff_epoch, self.clock).editing_window(time.time())
-        return initial_catch_up_target(editing, _WINDOWS_PER_HALF, base)
+        editing = MatchClock(self.kickoff_epoch, self.clock).editing_window(self._now())
+        target = initial_catch_up_target(editing, _WINDOWS_PER_HALF, base)
+        self._dlog("CATCH-UP", f"target={target} (data_ready={base}, editing_window={editing}, "
+                               f"late-join defaults windows below editing)")
+        return target
 
     def _windows_elapsed(self) -> int:
         """How many windows of the CURRENT half the live feed has already fully covered, so
@@ -851,6 +938,7 @@ class DungeonPartyFlow:
         # leader_poll_feed self-guards its full network path (fetch/record/share); the guard
         # here protects the clock-boundary arithmetic, the one path not already covered.
         await self.leader_poll_feed()
+        self._observe_peer()
         try:
             # Clock-driven boundary: once the match clock has advanced its editing window past
             # the window we are filling, that window's play time is over -> lock + resolve it.
@@ -861,10 +949,12 @@ class DungeonPartyFlow:
             # the Extra-Time absorber (is_extra_time): the clock never advances past it (it is
             # the cap), so it instead locks the moment its data is ready -- the half whistle for
             # the leader, the api-lead's frozen bundle for a follower (_live_data_ready).
-            boundary_passed = match_clock.editing_window(time.time()) > self.window
+            boundary_passed = match_clock.editing_window(self._now()) > self.window
             extra_time_done = (self.clock.is_extra_time(self.window)
                                and self._live_data_ready(self.window))
             if boundary_passed or extra_time_done:
+                reason = "extra-time data ready" if extra_time_done else "clock crossed boundary"
+                self._dlog("FORCE-RESOLVE", f"W{self.window} ({reason})")
                 self._play_screen.force_resolve()
         except Exception:
             pass
@@ -923,7 +1013,9 @@ class DungeonPartyFlow:
             self.live_feed and self.live_feed.current_minute()) else int(
             self.coord.view().get("match", {}).get("minute", 0))
         in_half = max(0, minute - _HALF_MIN)
-        self.kickoff_epoch = time.time() - in_half * 60
+        self.kickoff_epoch = self._now() - in_half * 60
+        self._peer_seen.clear()         # H2 bundles are re-keyed W1..W3; re-observe them
+        self._dlog("RE-ANCHOR", f"half 2 from minute {minute}' (kickoff_epoch re-estimated)")
 
     async def _advance_then_finish(self) -> None:
         if self.coord.is_leader:
@@ -1088,6 +1180,173 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
             run_with(fixture_id)
 
     picker()
+
+
+def _sim_label(feed: ReplayFeed) -> str:
+    """Short match tag for the diag QUERY lines (e.g. 'FRA-CRO'), from the recording's meta."""
+    home = (feed.meta.get("home_team") or "")[:3].upper()
+    away = (feed.meta.get("away_team") or "")[:3].upper()
+    return f"{home}-{away}" if home and away else (feed.meta.get("title") or "SIM")
+
+
+def _fmt_offset(minutes: int) -> str:
+    """+20 / -5 / 0 -- ASCII offset string for the KICKOFF diag line."""
+    if minutes == 0:
+        return "0"
+    return f"{'+' if minutes > 0 else '-'}{abs(minutes)}"
+
+
+def start_sim_realtime(app: "App", username: str, sim_rel_path: str, *,
+                       rate: float, offset_minutes: int,
+                       solo: bool = True, peer: bool = False,
+                       is_lead: bool = True) -> None:
+    """REALTIME SIM HARNESS: run the EXACT live dungeon path on a recorded match driven by a
+    virtual clock, with a [self]/[peer] diagnostic trail in the play screen's scrollable log.
+
+    rate=1.0 -> realtime (1x, emulates the live game); rate=0.0 -> accelerated (the clock is
+    frozen and the SIM F hotkey steps to the next window boundary, just to check the flow).
+    offset_minutes is the join time relative to kickoff (-5 = five minutes before kickoff,
+    +20 = the 20th minute, after window 1 has played).
+
+    solo (Phase 1): a party of one over an in-process LocalRelay -- no relay, no party-number
+    screen. peer co-op (Phase 2): TWO REAL devices over the shared PHP relay -- the api-lead
+    (is_lead) runs the sim feed/clock and shares per-window bundles; the follower is bundle-
+    driven (no sim feed/clock) and logs the api-lead's observed bundles as [drpaj] lines."""
+    if solo:
+        is_lead = True
+    coord_cls = PeerCoordinator if peer else PartyCoordinator
+    # The crawl runs under SIM so the in-game hotkeys are live: S = Continue, and (stepped mode)
+    # F = advance the virtual clock. The selection chain that reached here used its own SimMode.
+    sim = SimMode(True)
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+    relay = LocalRelay() if solo else RelayClient(
+        CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
+    diag = DiagLog(enabled=True, actor=(username or _SIM_SELF_ACTOR))
+
+    # FOLLOWER (Phase 2 co-op): bundle-driven, no sim feed/clock. Mirrors the production live
+    # follower (empty pool, real FeedClient is_lead=False, attach_live_from_blob at shop); the
+    # DiagLog is attached so _observe_peer logs the api-lead's shared bundles as [drpaj] lines.
+    if not is_lead:
+        feed_client = FeedClient(CONFIG["relay"]["base_url"],
+                                 feed_path=CONFIG["relay"]["feed_path"], is_lead=False,
+                                 live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
+
+        def picked_follower(party_number: int) -> None:
+            coord = coord_cls(relay=relay, party_id=party_number, username=username,
+                              pool=[], actuals_fn=lambda w: flow.live_actuals_for(w))
+            flow = DungeonPartyFlow(app, LiveFeed(), [], coord, sim)
+            flow.feed_client = feed_client    # is_lead=False; never calls get_feed
+            flow.is_follower_live = True
+            flow.peer = peer
+            flow.is_api_lead = False
+            flow.diag = diag
+
+            async def go() -> None:
+                await coord.join()
+                flow.start()
+            asyncio.ensure_future(go())
+
+        app.set_screen(PartyScreen(app, username, picked_follower, sim))
+        return
+
+    # LEAD / SOLO: build the sim feed + virtual clock and attach them as the two live seams.
+    feed = ReplayFeed.from_file(sim_rel_path)
+    pool = _pool_from_feed(feed)
+    replay_max = feed.last_known_minute()       # full-time minute of the recording (H2 whistle)
+    label = _sim_label(feed)
+    clock_source = SimClock(virtual_start=time.time(), real_start=time.time(), rate=rate)
+    kickoff_epoch = kickoff_epoch_for(clock_source.virtual_start, offset_minutes)
+    party_clock = HalfClock(_HALF_MIN, _WINDOW_MIN, total_windows=_WINDOWS_PER_HALF)
+
+    def picked(party_number: int) -> None:
+        coord = coord_cls(relay=relay, party_id=party_number, username=username,
+                          pool=pool, actuals_fn=lambda w: flow.live_actuals_for(w))
+        flow = DungeonPartyFlow(app, feed, pool, coord, sim)
+        flow.peer = peer
+        flow.is_api_lead = True
+        flow.clock_source = clock_source
+        flow.diag = diag
+        flow.fixture_label = label
+        flow.kickoff_epoch = kickoff_epoch
+
+        # The sim feed's visible minute / per-half whistle read the flow's CURRENT half clock and
+        # kickoff_epoch dynamically, so they re-anchor at half time: whistle = 45 in H1 (status ->
+        # halftime so W3 resolves), full time in H2 (so H2 minute 50 reads LIVE, never halftime).
+        def minute_now() -> int:
+            if flow.clock is None:
+                return max(0, offset_minutes)
+            return MatchClock(flow.kickoff_epoch, flow.clock).display_minute(flow._now())
+
+        def whistle_now() -> int:
+            return _HALF_MIN if flow.coord.half() == 1 else replay_max
+
+        def final_now() -> bool:
+            return flow.coord.half() == 2
+
+        sim_feed = SimLiveFeed(feed, minute_now=minute_now, whistle_now=whistle_now,
+                               final_now=final_now)
+        sim_client = SimFeedClient(diag, sim_feed, label, is_lead=True)
+        flow.attach_live(sim_client, sim_feed, _SIM_FIXTURE_ID, party_clock)
+
+        mode = "realtime 1x" if rate else "accelerated (F steps)"
+        diag.add(max(0, offset_minutes), "KICKOFF",
+                 f"mode={mode} offset={_fmt_offset(offset_minutes)} game={label} "
+                 f"({'co-op api-lead' if peer else 'solo'})",
+                 seconds_from_kickoff=offset_minutes * 60)
+
+        async def go() -> None:
+            await coord.join()
+            flow.start()
+        asyncio.ensure_future(go())
+
+    if solo:
+        picked(_SOLO_PARTY_ID)              # party of one; no party-number entry
+    else:
+        app.set_screen(PartyScreen(app, username, picked, sim))
+
+
+def start_sim_harness(app: "App", username: str, is_lead: bool = False) -> None:
+    """Launcher for the realtime SIM harness: choose role (solo / co-op api-lead / co-op join),
+    then -- for the clock-owning roles -- mode (realtime / accelerated), recorded match, and join
+    offset, before running the live dungeon path on the virtual clock. The selection screens use
+    a disabled SimMode so the developer chooses each step deliberately (no auto-advance)."""
+    sim = SimMode(False)
+    app.global_handler = sim.handle_global
+    app.overlay = sim.draw_overlay
+
+    def run(rate: float, mode_label: str, *, solo: bool, peer: bool) -> None:
+        def on_pick(path: str) -> None:
+            feed = ReplayFeed.from_file(path)
+            game_label = _sim_label(feed)
+
+            def on_start(offset: int) -> None:
+                start_sim_realtime(app, username, path, rate=rate, offset_minutes=offset,
+                                   solo=solo, peer=peer, is_lead=True)
+            app.set_screen(SimOffsetScreen(app, mode_label, game_label, on_start, sim))
+        start_sim_select(app, on_pick, sim_mode=False)
+
+    def pick_mode(*, solo: bool, peer: bool) -> None:
+        modes = [
+            (_SIM_HARNESS["realtime_label"],
+             lambda: run(1.0, _SIM_HARNESS["realtime_label"], solo=solo, peer=peer)),
+            (_SIM_HARNESS["accelerated_label"],
+             lambda: run(0.0, _SIM_HARNESS["accelerated_label"], solo=solo, peer=peer)),
+        ]
+        app.set_screen(LauncherScreen(app, modes))
+
+    def join_as_follower() -> None:
+        # Co-op follower (e.g. the phone): bundle-driven, no clock/feed/offset to choose -- just
+        # join the api-lead's party by number and replay its shared bundles.
+        start_sim_realtime(app, username, _LAUNCHER["test_sim"], rate=0.0, offset_minutes=0,
+                           solo=False, peer=True, is_lead=False)
+
+    roles = [
+        ("Solo (one device)", lambda: pick_mode(solo=True, peer=False)),
+        ("Co-op: I am the api-lead", lambda: pick_mode(solo=False, peer=True)),
+        ("Co-op: join a lead (phone)", join_as_follower),
+    ]
+    app.set_screen(LauncherScreen(app, roles))
 
 
 def start_live(app: "App", fixture_id: int, sim_mode: bool = False,
@@ -1270,11 +1529,18 @@ def start_launcher(app: "App", sim_mode: bool = False, is_lead: bool = False,
         start_dungeon_party_live(app, username, is_lead=is_lead, sim_mode=sim_mode,
                                  solo=False, peer=True)
 
-    # Three modes: solo live crawl, co-op live crawl (party), and the recorded-match test twin.
+    def go_sim_harness() -> None:
+        # Developer rehearsal of the live flow on a recorded match + virtual clock (realtime or
+        # accelerated), with a [self]/[peer] diagnostic trail. See start_sim_harness.
+        start_sim_harness(app, username, is_lead=is_lead)
+
+    # Modes: solo live crawl, co-op live crawl (party), the recorded-match test twin, and the
+    # realtime SIM harness (developer tool for rehearsing the live flow with no real match).
     options = [
         (_LAUNCHER["party_live_label"], go_party_live),
         (_LAUNCHER["party_coop_label"], go_party_coop),
         (_LAUNCHER["party_label"], go_party),
+        (_LAUNCHER["sim_harness_label"], go_sim_harness),
     ]
     app.set_screen(LauncherScreen(app, options))
 

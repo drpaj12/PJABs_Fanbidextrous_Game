@@ -7,6 +7,7 @@
   .venv/Scripts/python src/main.py --party              # SOLO crawl on a recording + SIM hotkeys
   .venv/Scripts/python src/main.py --sololive [--simlive]  # SOLO live crawl on the real feed
   .venv/Scripts/python src/main.py --dungeon            # dungeon crawl on test_sim recording
+  .venv/Scripts/python src/main.py --simrt              # realtime SIM harness (rehearse the live flow)
   .venv/Scripts/python src/main.py --live [fixture_id]  # LIVE match off the relay
   .venv/Scripts/python src/main.py --launcher           # web-style menu: live vs test game
   .venv/Scripts/python src/main.py --app                # full web entry: username -> menu
@@ -63,6 +64,10 @@ async def main() -> None:
         flow.start_sim_select(
             app, lambda path: flow.start_dungeon_sim(app, path, sim_mode=True),
             sim_mode=True)
+    elif "--simrt" in sys.argv:
+        # Realtime SIM harness: rehearse the live dungeon flow on a recorded match + virtual
+        # clock (role -> mode -> match -> join offset), with a [self]/[peer] diagnostic trail.
+        flow.start_sim_harness(app, "drpaj", is_lead=True)
     elif "--simdemo" in sys.argv:
         flow.start(app, sim_mode=True)
     else:

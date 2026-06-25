@@ -157,8 +157,19 @@
     "party_label": "Test crawl (recorded match)",
     "party_live_label": "Solo live crawl",
     "party_coop_label": "Co-op live crawl (party)",
+    "sim_harness_label": "SIM (realtime test)",
     "test_sim": "assets/data/simulations/wc2018_final_fra_cro.json",
     "simulations_dir": "assets/data/simulations"
+  },
+  "sim_harness": {
+    "_comment": "Realtime SIM harness: a developer tool that runs the EXACT live dungeon path on a recorded match driven by a virtual clock, so the live flow can be rehearsed with no real game. Mode 'realtime' runs the clock at 1x (rate 1.0); 'accelerated' freezes it (rate 0.0) and the SIM F hotkey steps to the next window boundary. offset_minutes is the join time relative to kickoff: -5 = 5 min before kickoff, +20 = 20th minute (after window 1). The +/- selector clamps offset to [offset_min, offset_max] in offset_step steps.",
+    "realtime_label": "Realtime (1x)",
+    "accelerated_label": "Accelerated (step with F)",
+    "self_actor": "drpaj",
+    "offset_default": 0,
+    "offset_min": -10,
+    "offset_max": 95,
+    "offset_step": 5
   },
   "assets": {
     "data_dir": "assets/data",
