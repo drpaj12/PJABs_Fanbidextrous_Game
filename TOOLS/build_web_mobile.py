@@ -1,9 +1,9 @@
 """Build and serve the portrait-mobile web version.
 
-Sibling to TOOLS/build_web.py, patched for portrait:
-  - stages to a separate ~/game_web_mobile_<stamp>/ dir so a desktop
-    build running in parallel doesn't collide with it
-  - installs WEB_BUILD/index_mobile.html instead of index_desktop.html
+This is the ONLY web build -- the game ships mobile-only. It:
+  - stages to a fresh ~/game_web_mobile_<stamp>/ dir (a path with no spaces
+    or parentheses, which pygbag 0.9.3 requires)
+  - installs the black-background WEB_BUILD/index_mobile.html template
   - outputs WEB_BUILD/game_web_mobile.zip
 
 414x896 is the phone-portrait framebuffer (matches config/game_config.json) -- if your

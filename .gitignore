@@ -27,7 +27,6 @@ desktop.ini
 # Build artifacts (zip/apk/tar.gz outputs) -- templates are source, tracked below
 NATIVE_BUILD/
 WEB_BUILD/*
-!WEB_BUILD/index_desktop.html
 !WEB_BUILD/index_mobile.html
 !WEB_BUILD/web_build_notes.md
 *.spec

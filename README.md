@@ -120,9 +120,9 @@ For a quick local preview, run pygbag directly against the project root
 Open http://localhost:8000 in a browser. This is how your final submission
 will run -- test it in the browser before you submit.
 
-For a real deployable build (desktop/landscape and portrait/mobile, with
-the black-background loading screen instead of pygbag's plain default),
-use the scripts in `TOOLS/` instead -- see Step 5 below.
+For a real deployable build (portrait/mobile, with the black-background
+loading screen instead of pygbag's plain default), use the build script in
+`TOOLS/` instead -- see Step 5 below.
 
 ### Run the Tests
 
@@ -191,9 +191,9 @@ structure -- class per module, one test per behavior.
 Keeps caches, virtual environments, IDE files, and generated web-build
 output out of your repo. The one section worth understanding:
 `WEB_BUILD/*` ignores everything in that folder *except*
-`index_desktop.html`, `index_mobile.html`, and `web_build_notes.md` --
-those three are hand-authored templates and documentation, not build
-output, so they stay tracked while the generated zips/apk/tar.gz do not.
+`index_mobile.html` and `web_build_notes.md` -- those two are
+hand-authored template and documentation, not build output, so they stay
+tracked while the generated zips/apk/tar.gz do not.
 
 ### main.py (project root) -- the web entry point
 pygbag requires a `main.py` at the project root with an async main loop.
@@ -208,19 +208,18 @@ Sets the browser tab title, package name, and window dimensions for the
 web build. Keep `width`/`height` here in sync with
 `config/game_config.json`'s `display.width`/`display.height`.
 
-### TOOLS/build_web.py and TOOLS/build_web_mobile.py -- web build scripts
-Run these to produce a deployable zip: `build_web.py` for a desktop/
-landscape build, `build_web_mobile.py` for a portrait/mobile build. Both
-stage a clean copy of the project, run pygbag, install the black-
-background `index_desktop.html`/`index_mobile.html` template over
-pygbag's plain default, and zip the result into `WEB_BUILD/`.
+### TOOLS/build_web_mobile.py -- web build script
+Run this to produce a deployable portrait/mobile zip (the game ships
+mobile-only). It stages a clean copy of the project, runs pygbag, installs
+the black-background `index_mobile.html` template over pygbag's plain
+default, and zips the result into `WEB_BUILD/`.
 
-### WEB_BUILD/ -- web build templates and docs
-`index_desktop.html` and `index_mobile.html` are the hand-crafted page
-templates the build scripts install (black background, correct canvas
-sizing, cache-busting). `web_build_notes.md` explains why they exist and
-how to change canvas dimensions if you resize your game. Read it before
-touching either template. Generated zips land here too but are gitignored.
+### WEB_BUILD/ -- web build template and docs
+`index_mobile.html` is the hand-crafted page template the build script
+installs (black background, correct canvas sizing, cache-busting).
+`web_build_notes.md` explains why it exists and how to change canvas
+dimensions if you resize your game. Read it before touching the template.
+Generated zips land here too but are gitignored.
 
 ---
 
@@ -352,12 +351,10 @@ your-game/
 |   +-- sounds/
 +-- tests/               pytest tests (run without a display)
 +-- TOOLS/
-|   +-- build_web.py        Desktop/landscape web build script
-|   +-- build_web_mobile.py Portrait/mobile web build script
+|   +-- build_web_mobile.py Portrait/mobile web build script (the only web build)
 +-- WEB_BUILD/
-    +-- index_desktop.html  Black-background desktop page template
     +-- index_mobile.html   Black-background mobile page template
-    +-- web_build_notes.md  Why the templates exist, how to resize them
+    +-- web_build_notes.md  Why the template exists, how to resize it
 ```
 
 ---

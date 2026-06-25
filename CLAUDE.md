@@ -91,12 +91,10 @@ your-game/
 |   +-- test_game_state.py
 |   +-- test_rules.py
 +-- TOOLS/
-|   +-- build_web.py        <- desktop/landscape web build script
-|   +-- build_web_mobile.py <- portrait/mobile web build script
+|   +-- build_web_mobile.py <- portrait/mobile web build script (the only web build)
 +-- WEB_BUILD/
-    +-- index_desktop.html  <- black-background desktop page template
     +-- index_mobile.html   <- black-background mobile page template
-    +-- web_build_notes.md  <- read before touching either template
+    +-- web_build_notes.md  <- read before touching the template
 ```
 
 ---
