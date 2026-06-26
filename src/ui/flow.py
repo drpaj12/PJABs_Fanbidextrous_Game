@@ -1091,6 +1091,11 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
                              feed_path=CONFIG["relay"]["feed_path"], is_lead=is_lead,
                              live_fixtures_path=CONFIG["relay"]["live_fixtures_path"])
 
+    def _clear_party(n: int) -> None:
+        # Manual "Clear server state" (api-lead): wipe the party's relay blob so the next game
+        # starts clean. Fire-and-forget; the lead then taps Create to rejoin a fresh blob.
+        asyncio.ensure_future(relay.party_reset(n))
+
     # FOLLOWER PATH (Spec Step 3): a non-lead client must NOT run the fixture picker / resolve /
     # lineup wait, and must NEVER resolve the fixture itself (two followers could otherwise pick
     # different matches). Instead it joins the party with an EMPTY pool, sits in the lobby polling
@@ -1149,6 +1154,9 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
                     coord = coord_cls(
                         relay=relay, party_id=party_number, username=username,
                         pool=pool, actuals_fn=lambda w: flow.live_actuals_for(w))
+                    # The api-lead records which fixture it is starting so PeerCoordinator can
+                    # auto-wipe a blob frozen on a DIFFERENT game (stale from a previous match).
+                    coord.chosen_fixture_id = real_id
                     flow = DungeonPartyFlow(app, feed, pool, coord, sim)
                     flow.kickoff_epoch = kickoff_epoch
                     flow.peer = peer
@@ -1163,7 +1171,8 @@ def start_dungeon_party_live(app: "App", username: str, is_lead: bool = False,
                 if solo:
                     picked(_SOLO_PARTY_ID)      # party of one; no party-number entry
                 else:
-                    app.set_screen(PartyScreen(app, username, picked, sim))
+                    app.set_screen(PartyScreen(app, username, picked, sim,
+                                               on_clear=_clear_party))
 
             app.set_screen(LiveWaitScreen(
                 app, feed, feed_client, real_id, target_minute=None,
@@ -1224,6 +1233,10 @@ def start_sim_realtime(app: "App", username: str, sim_rel_path: str, *,
         CONFIG["relay"]["base_url"], api_path=CONFIG["relay"]["api_path"])
     diag = DiagLog(enabled=True, actor=(username or _SIM_SELF_ACTOR))
 
+    def _clear_party(n: int) -> None:
+        # Manual "Clear server state" (api-lead): wipe the party's relay blob between sessions.
+        asyncio.ensure_future(relay.party_reset(n))
+
     # FOLLOWER (Phase 2 co-op): bundle-driven, no sim feed/clock. Mirrors the production live
     # follower (empty pool, real FeedClient is_lead=False, attach_live_from_blob at shop); the
     # DiagLog is attached so _observe_peer logs the api-lead's shared bundles as [drpaj] lines.
@@ -1262,6 +1275,7 @@ def start_sim_realtime(app: "App", username: str, sim_rel_path: str, *,
     def picked(party_number: int) -> None:
         coord = coord_cls(relay=relay, party_id=party_number, username=username,
                           pool=pool, actuals_fn=lambda w: flow.live_actuals_for(w))
+        coord.chosen_fixture_id = _SIM_FIXTURE_ID   # peer staleness gate (api-lead)
         flow = DungeonPartyFlow(app, feed, pool, coord, sim)
         flow.peer = peer
         flow.is_api_lead = True
@@ -1303,7 +1317,7 @@ def start_sim_realtime(app: "App", username: str, sim_rel_path: str, *,
     if solo:
         picked(_SOLO_PARTY_ID)              # party of one; no party-number entry
     else:
-        app.set_screen(PartyScreen(app, username, picked, sim))
+        app.set_screen(PartyScreen(app, username, picked, sim, on_clear=_clear_party))
 
 
 def start_sim_harness(app: "App", username: str, is_lead: bool = False) -> None:

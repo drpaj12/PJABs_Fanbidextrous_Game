@@ -4,8 +4,10 @@ properties -- byte-identical local results across clients, resolution from the s
 even when a follower never submitted its pick, no shop reconcile barrier, and a clean half
 advance -- using the production in-process LocalRelay as the shared bulletin board."""
 import asyncio
+from datetime import datetime, timezone
 
 from src.game.athlete import DraftedAthlete
+from src.game.party import Party
 from src.sync.local_relay import LocalRelay
 from src.sync.peer_coordinator import PeerCoordinator
 
@@ -122,6 +124,82 @@ def test_no_shop_reconcile_barrier():
     _run(lead.submit_loadout([], lead.shop_budget()))   # follower has NOT shopped / readied
     assert _run(lead.leader_try_reconcile_shop()) is True
     assert lead.session is not None and lead.session.party_size == 2
+
+
+_OLD_KICKOFF = "2020-01-01T00:00:00+00:00"   # decades before any test run -> always expired
+
+
+def _finished_blob(leader="drpaj", fixture_id=111, kickoff=_OLD_KICKOFF):
+    """A party blob frozen from a previous, finished game on this party number."""
+    p = Party.create(0, leader)
+    p.fixture_id = fixture_id
+    p.kickoff_iso = kickoff
+    p.phase = "play"
+    p.resolved_through_window = 2
+    p.dungeon = {"depth": 5, "power": 9}
+    p.log = ["old line"]
+    p.window_colors = ["g", "g"]
+    p.window_actuals = {"1": {"actuals": {"goal": 1}, "lines": [], "use": []}}
+    return p.to_dict()
+
+
+def test_api_lead_wipes_stale_blob_on_join():
+    # A leftover finished game sits on party 0; the api-lead starts a DIFFERENT fixture. On join
+    # it must reset the server state and rejoin a fresh empty blob -- no inherited dungeon/log.
+    relay, pool = LocalRelay(), _pool()
+    relay.blob = _finished_blob()
+    lead = _peer(relay, "drpaj", pool, seed=9)
+    lead.chosen_fixture_id = 222                 # a different game than the blob's 111
+    _run(lead.join())
+    assert lead.party.fixture_id == 0            # reset to lobby
+    assert lead.party.dungeon is None
+    assert lead.party.resolved_through_window == 0
+    assert lead.party.log == []
+    assert lead.party.window_actuals == {}
+    assert lead.seed == 9                          # fresh seed pushed onto the clean blob
+
+
+def test_api_lead_keeps_fresh_same_fixture_blob_on_join():
+    # Same fixture, recent kickoff (a genuine reconnect mid-game) -> the blob is NOT wiped.
+    relay, pool = LocalRelay(), _pool()
+    recent = datetime.now(timezone.utc).isoformat()
+    relay.blob = _finished_blob(fixture_id=222, kickoff=recent)
+    lead = _peer(relay, "drpaj", pool, seed=9)
+    lead.chosen_fixture_id = 222
+    _run(lead.join())
+    assert lead.party.fixture_id == 222          # preserved
+    assert lead.party.dungeon == {"depth": 5, "power": 9}
+    assert lead.party.resolved_through_window == 2
+
+
+def test_follower_refuses_to_replay_stale_bundle():
+    # A follower that joins onto a finished game's blob must not replay its bundles, even though
+    # a window-1 bundle is present -- the blob is long expired by the relay clock.
+    relay, pool = LocalRelay(), _pool()
+    relay.blob = _finished_blob()
+    follower = _peer(relay, "alice", pool)       # joins existing blob -> not the api-lead
+    _run(follower.join())
+    assert not follower.is_api_lead
+    assert follower._resolution_input(1) is None
+
+
+def test_leader_start_clears_prior_game_state():
+    # leader_start must scrub a previous game's dungeon/log/colors/resolved counter, not just
+    # the bundles -- this was the corruption source.
+    relay, pool = LocalRelay(), _pool()
+    lead = _peer(relay, "drpaj", pool, seed=3)
+    _run(lead.join())
+    # Simulate leftover state surviving on the blob into the new lobby.
+    _run(relay.party_push(0, "drpaj", {
+        "dungeon": {"depth": 7}, "log": ["stale"], "window_colors": ["r"],
+        "resolved_through_window": 3, "window_actuals": {"1": {"actuals": {}}}}))
+    _run(lead.leader_start())
+    assert lead.party.phase == "shop"
+    assert lead.party.dungeon is None
+    assert lead.party.log == []
+    assert lead.party.window_colors == []
+    assert lead.party.resolved_through_window == 0
+    assert lead.party.window_actuals == {}
 
 
 def test_half_advance_resets_local_progress_and_clears_bundles():

@@ -111,11 +111,12 @@
     "lead_username": "drpaj"
   },
   "party": {
-    "_comment": "Cooperative dungeon party (Plan 2). max_size 1-3 fighters; max_rooms party numbers 0..N-1; poll_seconds is how often a client re-reads the canonical party blob from the relay; per_player_treasury is each player's own starting gold pot.",
+    "_comment": "Cooperative dungeon party (Plan 2). max_size 1-3 fighters; max_rooms party numbers 0..N-1; poll_seconds is how often a client re-reads the canonical party blob from the relay; per_player_treasury is each player's own starting gold pot. stale_minutes_from_kickoff is the max lifetime of a party blob: more than this many minutes after the recorded kickoff (by the relay clock) the blob is leftover from a finished game and must not be replayed; a new game on a different fixture also wipes it.",
     "max_size": 3,
     "max_rooms": 4,
     "poll_seconds": 3,
-    "per_player_treasury": 300
+    "per_player_treasury": 300,
+    "stale_minutes_from_kickoff": 100
   },
   "pregame": {
     "start_button_label": "Start First Half",

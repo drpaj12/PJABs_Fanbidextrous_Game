@@ -37,8 +37,11 @@ from typing import Optional
 from src.game.party import (fighter_lines_from_picks, split_gold,
                             used_consumables_from_picks)
 from src.game.score import percent_complete, total_tiles_game
+from src.game.staleness import is_blob_stale
 from src.sync.party_coordinator import (PartyCoordinator, _MAX_WOUNDS, _PER_PLAYER)
 from src.utils.constants import CONFIG
+
+_STALE_MINUTES = int(CONFIG["party"].get("stale_minutes_from_kickoff", 100))
 
 
 class PeerCoordinator(PartyCoordinator):
@@ -54,6 +57,11 @@ class PeerCoordinator(PartyCoordinator):
         self._explicit_seed: Optional[int] = seed
         self.is_api_lead: bool = False
         self._resolved_through: int = 0   # windows resolved locally in the CURRENT half
+        # The fixture THIS client is about to start. Set by the flow on the api-lead path only
+        # (a follower does not choose a game). Feeds the staleness gate: a blob frozen on a
+        # different fixture is leftover from a previous game and gets wiped on join.
+        self.chosen_fixture_id: Optional[int] = None
+        self.stale_minutes: int = _STALE_MINUTES
 
     # -- identity / read -----------------------------------------------------
 
@@ -63,6 +71,20 @@ class PeerCoordinator(PartyCoordinator):
         the seed / per-window bundles / member economy into the blob."""
         return self.is_api_lead
 
+    def _blob_is_stale(self) -> bool:
+        """True when the blob we just read is leftover from an earlier game: a different chosen
+        fixture (api-lead only -- it sets chosen_fixture_id) or a game whose kickoff is older
+        than stale_minutes by the relay clock. A lobby blob (fixture 0, no kickoff) is never
+        stale. server_time None (relay reported no clock) disables the age signal."""
+        if self.party is None:
+            return False
+        return is_blob_stale(
+            blob_fixture_id=self.party.fixture_id,
+            kickoff_iso=self.party.kickoff_iso,
+            server_time=self.server_time,
+            stale_minutes=self.stale_minutes,
+            chosen_fixture_id=self.chosen_fixture_id)
+
     async def join(self) -> None:
         await super().join()
         # The relay's is_leader (creator at slot 0) becomes our api-lead. Then force is_leader
@@ -70,6 +92,12 @@ class PeerCoordinator(PartyCoordinator):
         self.is_api_lead = bool(self.is_leader)
         self.is_leader = True
         if self.is_api_lead:
+            # Auto-clear: if we rejoined onto a stale blob (a different fixture, or a game long
+            # over), wipe the server state and rejoin a fresh empty blob so this game never
+            # inherits a previous game's dungeon/log/bundles.
+            if self._blob_is_stale():
+                await self.relay.party_reset(self.party_id)
+                await super().join()
             if self._explicit_seed is None:
                 self.seed = random.randrange(1, 1_000_000)
             await self.relay.party_push(self.party_id, self.username,
@@ -96,8 +124,13 @@ class PeerCoordinator(PartyCoordinator):
 
     async def leader_start(self) -> None:
         """Creator only: seed each member's treasury and flip lobby -> shop, writing the seed
-        and clearing any stale bundles. Followers do not push; their lobby auto-advances when
-        they read phase == 'shop'."""
+        and clearing ALL prior-game state. Followers do not push; their lobby auto-advances when
+        they read phase == 'shop'.
+
+        The clear is exhaustive on purpose: besides window_actuals it also resets dungeon, log,
+        window_colors, resolved_through_window and window_picks. Leaving any of these from a
+        previous game on the same party number was the source of corrupted co-op state -- a new
+        game would render an old dungeon/log until the first window resolved over it."""
         if not self.is_api_lead:
             return
         await self.refresh()
@@ -110,7 +143,9 @@ class PeerCoordinator(PartyCoordinator):
             d["ready"] = False
             members.append(d)
         await self.relay.party_push(self.party_id, self.username, {
-            "phase": "shop", "members": members, "seed": self.seed, "window_actuals": {}})
+            "phase": "shop", "half": 1, "members": members, "seed": self.seed,
+            "window_actuals": {}, "dungeon": None, "log": [], "window_colors": [],
+            "resolved_through_window": 0, "clear_picks": True})
         await self.refresh()
 
     async def leader_try_reconcile_shop(self) -> bool:
@@ -149,6 +184,11 @@ class PeerCoordinator(PartyCoordinator):
                 "lines": fighter_lines_from_picks(self.party, window),
                 "use": used_consumables_from_picks(self.party, window),
             }
+        # Follower: never replay bundles from a stale blob (a game long over by the relay
+        # clock). Treat them as not-yet-available so this client waits for fresh state instead
+        # of resurrecting a finished game's dungeon.
+        if self._blob_is_stale():
+            return None
         bundle = self.party.window_actuals.get(str(window)) if self.party else None
         if not isinstance(bundle, dict) or "actuals" not in bundle:
             return None

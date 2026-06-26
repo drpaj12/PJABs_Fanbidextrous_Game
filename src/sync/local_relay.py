@@ -11,6 +11,7 @@ back to RelayClient.
 
 This is the production promotion of the in-memory FakeRelay the coordinator tests already use,
 so its behaviour is covered by tests/test_party_coordinator.py. Pure Python: no pygame."""
+import time
 from typing import Any, Optional
 
 from src.game.party import Party
@@ -36,7 +37,14 @@ class LocalRelay:
         return {"success": True, "slot": slot, "is_leader": p.is_leader(username)}
 
     async def party_state(self, party: int) -> dict[str, Any]:
-        return {"success": True, "party": self.blob}
+        # server_time mirrors the PHP relay so PeerCoordinator's staleness gate has a clock.
+        return {"success": True, "party": self.blob, "server_time": time.time()}
+
+    async def party_reset(self, party: int) -> dict[str, Any]:
+        """Drop the in-memory blob; the next party_join recreates it empty. Mirrors the PHP
+        relay's party_reset so the same coordinator code path works in-process."""
+        self.blob = None
+        return {"success": True}
 
     async def party_pick(self, party: int, username: str, window: int,
                          preds: list, use: Optional[list] = None) -> dict[str, Any]:

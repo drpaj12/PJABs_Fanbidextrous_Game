@@ -24,13 +24,20 @@ _MAX_ROOMS = int(CONFIG["party"]["max_rooms"])
 
 class PartyScreen(Screen):
     def __init__(self, app: "App", username: str, on_done: Callable[[int], None],
-                 sim: Optional[SimMode] = None) -> None:
+                 sim: Optional[SimMode] = None,
+                 on_clear: Optional[Callable[[int], None]] = None) -> None:
         super().__init__(app)
         self.username = username
         self.on_done = on_done
         self.sim = sim
+        # on_clear (api-lead only) wipes the chosen party's server state. None for followers,
+        # who never own the shared blob. Cleared via a two-tap confirm to prevent a fat-finger
+        # wipe of an in-progress game.
+        self.on_clear = on_clear
         self.party_number = 0
         self._done = False
+        self._clear_armed = False
+        self._cleared = False
 
         sw = app.screen.get_width()
         bw = LAYOUT.i("party_btn_w", 320)
@@ -40,6 +47,8 @@ class PartyScreen(Screen):
         x = (sw - bw) // 2
         self.create_btn = Button(pygame.Rect(x, y, bw, bh), "Create Party")
         self.join_btn = Button(pygame.Rect(x, y + bh + gap, bw, bh), "Join Party")
+        self.clear_btn = Button(pygame.Rect(x, y + 2 * (bh + gap), bw, bh),
+                                "Clear server state")
 
         sttop = LAYOUT.i("party_num_y", 250)
         stw = LAYOUT.i("party_stepper_w", 64)
@@ -53,10 +62,23 @@ class PartyScreen(Screen):
             return
         if self.minus_btn.hit(event.pos):
             self.party_number = (self.party_number - 1) % _MAX_ROOMS
+            self._clear_armed = self._cleared = False    # changing party re-arms the confirm
         elif self.plus_btn.hit(event.pos):
             self.party_number = (self.party_number + 1) % _MAX_ROOMS
+            self._clear_armed = self._cleared = False
+        elif self.on_clear is not None and self.clear_btn.hit(event.pos):
+            self._handle_clear()
         elif self.create_btn.hit(event.pos) or self.join_btn.hit(event.pos):
             self._finish()
+
+    def _handle_clear(self) -> None:
+        """Two-tap confirm: first tap arms, second tap wipes the party's server state."""
+        if not self._clear_armed:
+            self._clear_armed = True
+            return
+        self.on_clear(self.party_number)
+        self._clear_armed = False
+        self._cleared = True
 
     def _finish(self) -> None:
         self._done = True
@@ -90,3 +112,12 @@ class PartyScreen(Screen):
         bf = font(LAYOUT.i("party_num_label_size", 20))
         for b in (self.minus_btn, self.plus_btn, self.create_btn, self.join_btn):
             b.draw(surface, bf)
+
+        if self.on_clear is not None:
+            if self._cleared:
+                self.clear_btn.label = "Server state cleared"
+            elif self._clear_armed:
+                self.clear_btn.label = "Tap again to confirm"
+            else:
+                self.clear_btn.label = "Clear server state"
+            self.clear_btn.draw(surface, bf)

@@ -41,6 +41,7 @@ class PartyCoordinator:
         self.session: Optional[CrawlSession] = None   # authoritative, leader only
         self.last_gold: int = 0                       # gold from the most recent resolution
         self.last_actuals: dict = {}                  # actuals of the most recent resolution
+        self.server_time: Optional[float] = None      # relay clock from the last party_state
 
     # -- identity / read -----------------------------------------------------
 
@@ -52,6 +53,7 @@ class PartyCoordinator:
 
     async def refresh(self) -> None:
         resp = await self.relay.party_state(self.party_id)
+        self.server_time = resp.get("server_time")
         blob = resp.get("party")
         if blob:
             self.party = Party.from_dict(blob)

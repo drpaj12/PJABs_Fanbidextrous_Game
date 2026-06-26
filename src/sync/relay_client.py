@@ -112,3 +112,9 @@ class RelayClient:
                          state: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps({"type": "party_push", "username": username, **state})
         return json.loads(await self._t.post(self._party_url("party_push", party), body))
+
+    async def party_reset(self, party: int) -> dict[str, Any]:
+        """Wipe the party's server state (delete the relay's blob). The next party_join
+        recreates it empty. Used to clear state left over from a previous game."""
+        body = json.dumps({"type": "party_reset"})
+        return json.loads(await self._t.post(self._party_url("party_reset", party), body))

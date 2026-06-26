@@ -217,7 +217,19 @@ function action_party_join(int $party): void {
 function action_party_state(int $party): void {
     $p = read_party($party);
     if (!$p) { fail('Party not found', 404); }
-    respond(['success' => true, 'party' => $p]);
+    // server_time lets a client judge blob staleness against the relay's own clock (a party
+    // blob is never auto-deleted, so one left over from a finished game must not be replayed).
+    respond(['success' => true, 'party' => $p, 'server_time' => time()]);
+}
+
+function action_party_reset(int $party): void {
+    // Wipe a party's server state. Used by the api-lead to clear leftover state from a previous
+    // game -- both automatically (a new game on a different fixture / a long-finished blob) and
+    // manually via the "Clear server state" button. The next party_join recreates it empty.
+    if ($party < 0 || $party >= MAX_PARTIES) { fail('Invalid party number'); }
+    $path = get_party_path($party);
+    if (file_exists($path)) { unlink($path); }
+    respond(['success' => true, 'message' => "Party $party reset"]);
 }
 
 function action_party_pick(int $party): void {
@@ -488,11 +500,13 @@ switch ($action) {
     case 'party_pick':     action_party_pick($party); break;
     case 'party_loadout':  action_party_loadout($party); break;
     case 'party_push':     action_party_push($party); break;
+    case 'party_reset':    action_party_reset($party); break;
     case '':
-        respond(['name' => 'PJAB Coop Soccer Relay', 'version' => '1.1.0',
+        respond(['name' => 'PJAB Coop Soccer Relay', 'version' => '1.2.0',
                  'endpoints' => [
                      'list', 'join', 'state', 'update', 'heartbeat', 'leave',
                      'party_join', 'party_state', 'party_pick', 'party_loadout', 'party_push',
+                     'party_reset',
                  ]]);
         break;
     default: fail("Unknown action: $action");
